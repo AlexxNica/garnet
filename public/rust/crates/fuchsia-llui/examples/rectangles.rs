@@ -6,10 +6,16 @@
 
 #[macro_use]
 extern crate error_chain;
+extern crate futures;
 extern crate fuchsia_llui as llui;
+extern crate tokio_core;
 
+use futures::{Future, Stream};
+use futures::empty;
 use llui::{Color, FrameBuffer, wait_for_close};
 use std::{thread, time};
+use std::time::Duration;
+use tokio_core::reactor::{self, Interval};
 
 error_chain!{
     links {
@@ -150,8 +156,10 @@ fn run() -> Result<()> {
             height: 100,
         },
     };
+    let mut core = reactor::Core::new().expect("Unable to create core");
+    let interval = Interval::new(Duration::from_millis(200), &core.handle()).unwrap();
     let mut i: usize = 0;
-    loop {
+    core.handle().spawn(interval.for_each(move |()| {
         fill_with_color(&mut fb, &fuchsia);
         match i % 3 {
             0 => {
@@ -172,8 +180,11 @@ fn run() -> Result<()> {
         }
         i = i.wrapping_add(1);
         fb.flush().unwrap();
-        thread::sleep(time::Duration::from_millis(800));
-    }
+        Ok(())
+    }).map_err(|_| ()));
+
+    let _: Result<()> = core.run(empty());
+    Ok(())
 }
 
 fn main() {
