@@ -156,7 +156,8 @@ fn run() -> Result<()> {
         },
     };
     let mut core = reactor::Core::new().expect("Unable to create core");
-    let interval = Interval::new(Duration::from_millis(200), &core.handle()).unwrap();
+    let handle = &core.handle();
+    let interval = Interval::new(Duration::from_millis(200), handle).unwrap();
     let mut i: usize = 0;
     core.handle().spawn(interval.for_each(move |()| {
         fill_with_color(&mut fb, &fuchsia);
@@ -183,7 +184,7 @@ fn run() -> Result<()> {
     }).map_err(|_| ()));
 
     let mut input_handler = InputHandler::new();
-    input_handler.open_devices();
+    input_handler.open_devices(handle);
 
     let _: Result<()> = core.run(empty());
     Ok(())

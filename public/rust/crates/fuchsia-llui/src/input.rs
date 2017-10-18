@@ -6,10 +6,7 @@ use std::mem;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
 use std::ptr;
-use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::mpsc::Sender;
-use std::thread;
 
 extern crate libc;
 
@@ -21,11 +18,21 @@ use fuchsia_zircon_sys::zx_handle_t;
 use fuchsia_zircon_sys::zx_object_wait_many;
 use fuchsia_zircon_sys::zx_wait_item_t;
 
+use fuchsia_zircon;
+
+use mio::fuchsia::EventedHandle;
+use tokio_core::reactor::{Handle, PollEvented};
+
 #[repr(C, packed)]
 struct boot_mouse_report_t {
     buttons: u8,
     rel_x: i8,
     rel_y: i8,
+}
+
+struct Thing {
+    handle: fuchsia_zircon::Handle,
+    evented: PollEvented<EventedHandle>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -154,7 +161,7 @@ impl InputHandler {
         }
     }
 
-    pub fn open_devices(&mut self) {
+    pub fn open_devices(&mut self, tokio_handle: &Handle) {
         let mut device_index = 0;
         loop {
             let device_path_string = format!("/dev/class/input/{:03}", device_index);
@@ -191,6 +198,8 @@ impl InputHandler {
                                 handler: input_handler,
                             };
                             self.input_devices.push(input_device);
+                            let eh = unsafe { EventedHandle::new(handle) };
+                            let pe = PollEvented::new(eh, tokio_handle).unwrap();
                         }
                     }
                     None => {}

@@ -10,9 +10,12 @@
 extern crate bitflags;
 #[macro_use]
 extern crate error_chain;
+extern crate fuchsia_zircon;
 extern crate fuchsia_zircon_sys;
 extern crate fdio;
 extern crate libc;
+extern crate mio;
+extern crate tokio_core;
 
 error_chain!{
     foreign_links {
@@ -26,7 +29,8 @@ mod input;
 mod zircon_stubs;
 
 pub use color::Color;
-use fdio::{IOCTL_FAMILY_DISPLAY, IOCTL_KIND_DEFAULT, IOCTL_KIND_GET_HANDLE, ioctl, make_ioctl};
+use fdio::{ioctl, make_ioctl};
+use fdio::fdio_sys::{IOCTL_FAMILY_DISPLAY, IOCTL_KIND_DEFAULT, IOCTL_KIND_GET_HANDLE};
 use fuchsia_zircon_sys::{ZX_VM_FLAG_PERM_READ, ZX_VM_FLAG_PERM_WRITE, zx_handle_t, zx_vmar_map,
                          zx_vmar_root_self};
 pub use input::InputHandler;
@@ -86,7 +90,8 @@ fn get_info_for_device(fd: i32) -> Result<ioctl_display_get_fb_t> {
             flags: 0,
         },
     };
-    let framebuffer_ptr: *mut u8 = &mut framebuffer as *mut _ as *mut u8;
+    let framebuffer_ptr: *mut std::os::raw::c_void = &mut framebuffer as *mut _ as
+        *mut std::os::raw::c_void;
 
     let status = unsafe {
         ioctl(
