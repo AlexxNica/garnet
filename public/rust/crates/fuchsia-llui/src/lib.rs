@@ -7,9 +7,12 @@
 // `error_chain!` can recurse deeply
 #![recursion_limit = "1024"]
 #[macro_use]
+extern crate bitflags;
+#[macro_use]
 extern crate error_chain;
 extern crate fuchsia_zircon_sys;
 extern crate fdio;
+extern crate libc;
 
 error_chain!{
     foreign_links {
@@ -18,11 +21,15 @@ error_chain!{
 }
 
 mod color;
+mod geometry;
+mod input;
+mod zircon_stubs;
 
 pub use color::Color;
 use fdio::{IOCTL_FAMILY_DISPLAY, IOCTL_KIND_DEFAULT, IOCTL_KIND_GET_HANDLE, ioctl, make_ioctl};
 use fuchsia_zircon_sys::{ZX_VM_FLAG_PERM_READ, ZX_VM_FLAG_PERM_WRITE, zx_handle_t, zx_vmar_map,
                          zx_vmar_root_self};
+pub use input::InputHandler;
 use std::fmt;
 use std::fs::File;
 use std::io::{self, Read};

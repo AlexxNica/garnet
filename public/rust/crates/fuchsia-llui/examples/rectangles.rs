@@ -12,8 +12,7 @@ extern crate tokio_core;
 
 use futures::{Future, Stream};
 use futures::empty;
-use llui::{Color, FrameBuffer, wait_for_close};
-use std::{thread, time};
+use llui::{Color, FrameBuffer, InputHandler, wait_for_close};
 use std::time::Duration;
 use tokio_core::reactor::{self, Interval};
 
@@ -182,6 +181,9 @@ fn run() -> Result<()> {
         fb.flush().unwrap();
         Ok(())
     }).map_err(|_| ()));
+
+    let mut input_handler = InputHandler::new();
+    input_handler.open_devices();
 
     let _: Result<()> = core.run(empty());
     Ok(())
