@@ -12,27 +12,45 @@ extern crate libc;
 
 use zircon_stubs::*;
 
-use fuchsia_zircon_sys::ZX_SIGNAL_NONE;
+// use fuchsia_zircon_sys::ZX_SIGNAL_NONE;
+
 use fuchsia_zircon_sys::ZX_USER_SIGNAL_0;
 use fuchsia_zircon_sys::zx_handle_t;
-use fuchsia_zircon_sys::zx_object_wait_many;
-use fuchsia_zircon_sys::zx_wait_item_t;
+// use fuchsia_zircon_sys::zx_object_wait_many;
+// use fuchsia_zircon_sys::zx_wait_item_t;
 
 use fuchsia_zircon;
 
-use mio::fuchsia::EventedHandle;
+use futures::prelude::*;
+use mio::fuchsia::{EventedHandle, FuchsiaReady};
 use tokio_core::reactor::{Handle, PollEvented};
+
+struct Thing {
+    handle: fuchsia_zircon::Handle,
+    evented: PollEvented<EventedHandle>,
+}
+
+impl Future for Thing {
+    type Item = ();
+    type Error = ();
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        let signals = self.evented.poll_ready(FuchsiaReady::from(ZX_USER_SIGNAL_0).into());
+        println!("Thing:poll {:?}", signals);
+        match signals {
+            Async::NotReady => Err(()),
+            Async::Ready(ready) => {
+                Ok(Async::Ready(()))
+            }
+        }
+    }
+}
 
 #[repr(C, packed)]
 struct boot_mouse_report_t {
     buttons: u8,
     rel_x: i8,
     rel_y: i8,
-}
-
-struct Thing {
-    handle: fuchsia_zircon::Handle,
-    evented: PollEvented<EventedHandle>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -200,6 +218,11 @@ impl InputHandler {
                             self.input_devices.push(input_device);
                             let eh = unsafe { EventedHandle::new(handle) };
                             let pe = PollEvented::new(eh, tokio_handle).unwrap();
+                            let f = Thing {
+                                handle: unsafe { fuchsia_zircon::Handle::from_raw(handle) },
+                                evented: pe,
+                            };
+                            tokio_handle.spawn(f);
                         }
                     }
                     None => {}

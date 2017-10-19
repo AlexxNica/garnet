@@ -12,6 +12,7 @@ extern crate bitflags;
 extern crate error_chain;
 extern crate fuchsia_zircon;
 extern crate fuchsia_zircon_sys;
+extern crate futures;
 extern crate fdio;
 extern crate libc;
 extern crate mio;
