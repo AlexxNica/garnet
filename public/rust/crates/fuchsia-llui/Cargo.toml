@@ -4,9 +4,9 @@ version = "0.1.0"
 authors = ["Rob Tsuk <robtsuk@google.com>"]
 
 [dependencies]
-fdio = "0.2.0"
+fdio = { path = '../fdio' }
 font-rs = { git = "https://github.com/google/font-rs.git" }
-fuchsia-zircon-sys = "= 0.3.1"
+fuchsia-zircon-sys = { path = "../fuchsia-zircon/fuchsia-zircon-sys" }
 
 [dependencies.error-chain]
 version = "0.11.0"
