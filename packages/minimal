@@ -1,0 +1,33 @@
+{
+    "imports": [
+        "garnet/packages/boringssl",
+        "garnet/packages/cmdutils",
+        "garnet/packages/debugserver",
+        "garnet/packages/drivers",
+        "garnet/packages/fidl",
+        "garnet/packages/fonts",
+        "garnet/packages/fortune",
+        "garnet/packages/fsl",
+        "garnet/packages/fxl",
+        "garnet/packages/icu",
+        "garnet/packages/icu_data",
+        "garnet/packages/listen",
+        "garnet/packages/make-fuchsia-vol",
+        "garnet/packages/netconnector",
+        "garnet/packages/netstack",
+        "garnet/packages/network",
+        "garnet/packages/network_time",
+        "garnet/packages/openssh",
+        "garnet/packages/openssh-keys",
+        "garnet/packages/openssh-keys",
+        "garnet/packages/pm",
+        "garnet/packages/pmd",
+        "garnet/packages/power_manager",
+        "garnet/packages/runtime",
+        "garnet/packages/runtime_config",
+        "garnet/packages/thinfs",
+        "garnet/packages/url",
+        "garnet/packages/wlanstack",
+        "garnet/packages/zlib"
+    ]
+}
