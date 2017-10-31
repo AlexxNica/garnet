@@ -11,4 +11,8 @@ description = "Library for managing Fuchsia applications and services"
 
 [dependencies]
 futures = "0.1.15"
-tokio-core = "0.1"
+tokio-core = "= 0.1.10"
+fuchsia-zircon = "= 0.3.1"
+fuchsia-zircon-sys = "= 0.3.1"
+mxruntime = "= 0.1.0"
+fidl = "= 0.1.0"

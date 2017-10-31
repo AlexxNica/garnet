@@ -8,7 +8,8 @@
 extern crate fuchsia_zircon as zircon;
 extern crate mxruntime;
 
-use zircon::{AsHandleRef, Channel, MessageBuf, ZX_TIME_INFINITE, ZX_CHANNEL_READABLE};
+use zircon::{AsHandleRef, Channel, MessageBuf};
+use zircon::sys::{ZX_TIME_INFINITE, ZX_CHANNEL_READABLE};
 use mxruntime::{HandleType, get_startup_handle};
 
 fn align(offset: usize, alignment: usize) -> usize {

@@ -1,0 +1,20 @@
+[workspace]
+members = [
+  "public/rust/crates/fuchsia-zircon",
+  "public/rust/crates/fuchsia-zircon/fuchsia-zircon-sys",
+  "public/rust/crates/fuchsia-llui",
+  "public/rust/crates/fuchsia-vfs",
+  "public/rust/crates/fdio",
+  "public/rust/crates/ddk-rs",
+  "public/rust/crates/tokio-fuchsia",
+]
+
+[patch.crates-io]
+fuchsia-zircon = { path = "public/rust/crates/fuchsia-zircon" }
+fuchsia-zircon-sys = { path = "public/rust/crates/fuchsia-zircon/fuchsia-zircon-sys" }
+tokio-fuchsia = { path = "public/rust/crates/tokio-fuchsia" }
+fidl = { path = "public/lib/fidl/rust/fidl" }
+fdio = { path = "public/rust/crates/fdio" }
+mio = { path = "../third_party/rust-mirrors/mio" }
+rand = { path = "../third_party/rust-mirrors/rand" }
+tokio-core = { path = "../third_party/rust-mirrors/tokio-core" }
