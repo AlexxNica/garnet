@@ -134,6 +134,16 @@ namespace {
     fidl_device->advertising_data = ad.AsLEAdvertisingData();
   }
 
+  // Initialize advertising data only if its non-empty.
+  if (device.advertising_data().size() != 0u) {
+    ::btlib::gap::AdvertisingData ad;
+    if (!::btlib::gap::AdvertisingData::FromBytes(device.advertising_data(),
+                                                  &ad))
+      return nullptr;
+
+    fidl_device->advertising_data = ad.AsLEAdvertisingData();
+  }
+
   if (device.rssi() != ::btlib::hci::kRSSIInvalid) {
     fidl_device->rssi = ::btfidl::Int8::New();
     fidl_device->rssi->value = device.rssi();
