@@ -33,7 +33,15 @@ namespace l2cap {
 class ChannelManager;
 }  // namespace l2cap
 
+namespace gatt {
+class LocalServiceManager;
+}  // namespace gatt
+
 namespace gap {
+
+namespace internal {
+class ConnectionState;
+}  // namespace internal
 
 // TODO(armansito): Document the usage pattern.
 
@@ -61,6 +69,7 @@ class LowEnergyConnectionRef final {
 
  private:
   friend class LowEnergyConnectionManager;
+  friend class internal::ConnectionState;
 
   LowEnergyConnectionRef(const std::string& device_id,
                          fxl::WeakPtr<LowEnergyConnectionManager> manager);
@@ -121,7 +130,9 @@ class LowEnergyConnectionManager final {
   // A connection listener can be used to be notified when a connection is
   // established to any remote LE device.
   //
-  // |callback| is posted on the creation thread's task runner.
+  // |callback| is run on the creation thread's task runner. A previously
+  // registered |callback| is guaranteed not to run if it is unregistered via
+  // RemoveListener().
   using ListenerId = size_t;
   using ConnectionCallback = std::function<void(LowEnergyConnectionRefPtr)>;
   ListenerId AddListener(const ConnectionCallback& callback);
@@ -154,6 +165,7 @@ class LowEnergyConnectionManager final {
  private:
   friend class LowEnergyConnectionRef;
 
+  // TODO: move this to src file?
   struct ConnectionState {
     ConnectionState() = default;
     ~ConnectionState() = default;
@@ -173,7 +185,9 @@ class LowEnergyConnectionManager final {
   };
 
   // Mapping from device identifiers to open LE connections.
-  using ConnectionStateMap = std::unordered_map<std::string, ConnectionState>;
+  using ConnectionStateMap =
+      std::unordered_map<std::string,
+                         std::unique_ptr<internal::ConnectionState>>;
 
   class PendingRequestData {
    public:
@@ -215,9 +229,9 @@ class LowEnergyConnectionManager final {
 
   // Initializes the connection state for the device with the given identifier
   // and returns the initial reference.
-  LowEnergyConnectionRefPtr InitializeConnection(
-      const std::string& device_identifier,
-      std::unique_ptr<hci::Connection> connection);
+  std::pair<LowEnergyConnectionRefPtr, internal::ConnectionState*>
+  InitializeConnection(const std::string& device_identifier,
+                       std::unique_ptr<hci::Connection> link);
 
   // Adds a new connection reference to an existing connection to the device
   // with the ID |device_identifier| and returns it. Returns nullptr if
@@ -225,13 +239,19 @@ class LowEnergyConnectionManager final {
   LowEnergyConnectionRefPtr AddConnectionRef(
       const std::string& device_identifier);
 
-  // Cleans up a connection state. This result in a HCI_Disconnect command (if
-  // the connection is marked as open) and notifies any referenced
-  // LowEnergyConnectionRefs of the disconnection.
+  // Cleans up a connection state. This result in a HCI_Disconnect command
+  // if |close_link| is true, and notifies any referenced
+  // LowEnergyConnectionRefs of the disconnection. Marks the corresponding
+  // RemoteDeviceCache entry as disconnected and cleans up all data bearers.
+  //
+  // |conn_state| will have been removed from the underlying map at the time of
+  // a call. Its ownership is passed to the method for disposal.
   //
   // This is also responsible for unregistering the link from managed subsystems
   // (e.g. L2CAP).
-  void CleanUpConnectionState(ConnectionState* conn_state);
+  void CleanUpConnectionState(
+      std::unique_ptr<internal::ConnectionState> conn_state,
+      bool close_link = true);
 
   // Called by |connector_| when a new LE connection has been created.
   void OnConnectionCreated(std::unique_ptr<hci::Connection> connection);
@@ -305,6 +325,9 @@ class LowEnergyConnectionManager final {
   // The L2CAP layer is shared between the BR/EDR and LE connection managers and
   // it is expected to out-live both. Expected to outlive this instance.
   l2cap::ChannelManager* l2cap_;  // weak
+
+  // Local GATT service registry.
+  std::unique_ptr<gatt::LocalServiceManager> gatt_registry_;
 
   // Event handler ID for the HCI Disconnection Complete event.
   hci::CommandChannel::EventHandlerId disconn_cmpl_handler_id_;
