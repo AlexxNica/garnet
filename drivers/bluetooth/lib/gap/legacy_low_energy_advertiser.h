@@ -24,6 +24,17 @@ class LegacyLowEnergyAdvertiser final : public LowEnergyAdvertiser {
   // LowEnergyAdvertiser overrides:
   size_t GetSizeLimit() override;
   size_t GetMaxAdvertisements() const override { return 1; }
+
+  // LegacyLowEnergyAdvertiser supports only a single advertising instance,
+  // hence it can report additional errors in the following conditions:
+  // 1. If called while a start request is pending, reports
+  //    hci::kRepeatedAttemts.
+  // 2. If called while a stop request is pending, then cancels the stop request
+  //    and proceeds with start.
+  // 3. If called while already advertising, reports
+  //    hci::kUnsupportedFeatureOrParameter.
+  // TODO(armansito): We need to stop using HCI error codes for errors that are
+  // not reported by the controller.
   void StartAdvertising(const common::DeviceAddress& address,
                         const AdvertisingData& data,
                         const AdvertisingData& scan_rsp,
@@ -31,7 +42,15 @@ class LegacyLowEnergyAdvertiser final : public LowEnergyAdvertiser {
                         uint32_t interval_ms,
                         bool anonymous,
                         const AdvertisingResultCallback& callback) override;
+
+  // 1. If called while a stop request is pending, returns false.
+  // 2. If called while a start request is pending, then cancels the start
+  //    request and proceeds with start.
+  // 3. Returns false if called while not advertising.
   bool StopAdvertising(const common::DeviceAddress& address) override;
+
+  // Clears the advertising state before passing |connection| on to
+  // |connect_callback_|.
   void OnIncomingConnection(LowEnergyConnectionRefPtr connection) override;
 
  private:
@@ -41,6 +60,9 @@ class LegacyLowEnergyAdvertiser final : public LowEnergyAdvertiser {
   // The transport that's used to issue commands
   fxl::RefPtr<hci::Transport> hci_;
 
+  // |hci_cmd_runner_| will be running when a start or stop is pending.
+  // |starting_| is set to true if a start is pending.
+  bool starting_;
   std::unique_ptr<hci::SequentialCommandRunner> hci_cmd_runner_;
 
   // Non-zero if advertising has been enabled.
