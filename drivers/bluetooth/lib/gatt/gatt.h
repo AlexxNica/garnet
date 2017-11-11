@@ -6,7 +6,7 @@
 
 #include "garnet/drivers/bluetooth/lib/common/uuid.h"
 
-namespace bluetooth {
+namespace btlib {
 namespace gatt {
 
 // 16-bit Attribute Types defined by the GATT profile (Vol 3, Part G, 3.4).
@@ -45,4 +45,4 @@ constexpr uint16_t kCharacteristicExtendedPropertyReliableWrite = 0x0001;
 constexpr uint16_t kCharacteristicExtendedPropertyWritableAuxiliaries = 0x0002;
 
 }  // namespace gatt
-}  // namespace bluetooth
+}  // namespace btlib

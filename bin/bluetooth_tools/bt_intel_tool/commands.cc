@@ -30,26 +30,26 @@ namespace bt_intel {
 namespace {
 
 void StatusCallback(fxl::Closure complete_cb,
-                    bluetooth::hci::CommandChannel::TransactionId id,
-                    bluetooth::hci::Status status) {
+                    ::btlib::hci::CommandChannel::TransactionId id,
+                    ::btlib::hci::Status status) {
   std::cout << "  Command Status: " << fxl::StringPrintf("0x%02x", status)
             << " (id=" << id << ")" << std::endl;
-  if (status != bluetooth::hci::Status::kSuccess)
+  if (status != ::btlib::hci::Status::kSuccess)
     complete_cb();
 }
 
-hci::CommandChannel::TransactionId SendCommand(
+::btlib::hci::CommandChannel::TransactionId SendCommand(
     const CommandData* cmd_data,
-    std::unique_ptr<hci::CommandPacket> packet,
-    const hci::CommandChannel::CommandCompleteCallback& cb,
+    std::unique_ptr<::btlib::hci::CommandPacket> packet,
+    const ::btlib::hci::CommandChannel::CommandCompleteCallback& cb,
     const fxl::Closure& complete_cb) {
   return cmd_data->cmd_channel()->SendCommand(
       std::move(packet), cmd_data->task_runner(), cb,
       std::bind(&StatusCallback, complete_cb, _1, _2));
 }
 
-void LogCommandComplete(hci::Status status,
-                        hci::CommandChannel::TransactionId id) {
+void LogCommandComplete(::btlib::hci::Status status,
+                        ::btlib::hci::CommandChannel::TransactionId id) {
   std::cout << "  Command Complete - status: "
             << fxl::StringPrintf("0x%02x", status) << " (id=" << id << ")"
             << std::endl;
@@ -60,8 +60,9 @@ std::string PrintByte(uint8_t byte) {
   return fxl::StringPrintf("%u (0x%02x)", byte, byte);
 }
 
-std::string EnableParamToString(hci::GenericEnableParam param) {
-  return (param == hci::GenericEnableParam::kEnable) ? "enabled" : "disabled";
+std::string EnableParamToString(::btlib::hci::GenericEnableParam param) {
+  return (param == ::btlib::hci::GenericEnableParam::kEnable) ? "enabled"
+                                                              : "disabled";
 }
 
 std::string FirmwareVariantToString(uint8_t fw_variant) {
@@ -84,8 +85,9 @@ bool HandleReadVersion(const CommandData* cmd_data,
     return false;
   }
 
-  auto cb = [cmd_line, complete_cb](hci::CommandChannel::TransactionId id,
-                                    const hci::EventPacket& event) {
+  auto cb = [cmd_line, complete_cb](
+                ::btlib::hci::CommandChannel::TransactionId id,
+                const ::btlib::hci::EventPacket& event) {
     auto params = event.return_params<IntelVersionReturnParams>();
     LogCommandComplete(params->status, id);
 
@@ -123,7 +125,7 @@ bool HandleReadVersion(const CommandData* cmd_data,
     complete_cb();
   };
 
-  auto packet = hci::CommandPacket::New(kReadVersion);
+  auto packet = ::btlib::hci::CommandPacket::New(kReadVersion);
   auto id = SendCommand(cmd_data, std::move(packet), cb, complete_cb);
   std::cout << "  Sent HCI Vendor (Intel) Read Version (id=" << id << ")"
             << std::endl;
@@ -139,8 +141,9 @@ bool HandleReadBootParams(const CommandData* cmd_data,
     return false;
   }
 
-  auto cb = [cmd_line, complete_cb](hci::CommandChannel::TransactionId id,
-                                    const hci::EventPacket& event) {
+  auto cb = [cmd_line, complete_cb](
+                ::btlib::hci::CommandChannel::TransactionId id,
+                const ::btlib::hci::EventPacket& event) {
     auto params = event.return_params<IntelReadBootParamsReturnParams>();
     LogCommandComplete(params->status, id);
 
@@ -169,7 +172,7 @@ bool HandleReadBootParams(const CommandData* cmd_data,
     complete_cb();
   };
 
-  auto packet = hci::CommandPacket::New(kReadBootParams);
+  auto packet = ::btlib::hci::CommandPacket::New(kReadBootParams);
   auto id = SendCommand(cmd_data, std::move(packet), cb, complete_cb);
   std::cout << "  Sent HCI Vendor (Intel) Read Boot Params (id=" << id << ")"
             << std::endl;
@@ -185,11 +188,11 @@ bool HandleReset(const CommandData* cmd_data,
     return false;
   }
 
-  auto cb = [](hci::CommandChannel::TransactionId id,
-               const hci::EventPacket& event) {};
+  auto cb = [](::btlib::hci::CommandChannel::TransactionId id,
+               const ::btlib::hci::EventPacket& event) {};
 
   auto packet =
-      hci::CommandPacket::New(kReset, sizeof(IntelResetCommandParams));
+      ::btlib::hci::CommandPacket::New(kReset, sizeof(IntelResetCommandParams));
   auto params =
       packet->mutable_view()->mutable_payload<IntelResetCommandParams>();
   params->data[0] = 0x00;
@@ -219,7 +222,7 @@ bool HandleReset(const CommandData* cmd_data,
 }  // namespace
 
 void RegisterCommands(const CommandData* data,
-                      bluetooth::tools::CommandDispatcher* dispatcher) {
+                      ::bluetooth_tools::CommandDispatcher* dispatcher) {
 #define BIND(handler) \
   std::bind(&handler, data, std::placeholders::_1, std::placeholders::_2)
 

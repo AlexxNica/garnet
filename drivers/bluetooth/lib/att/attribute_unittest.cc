@@ -7,7 +7,7 @@
 #include "garnet/drivers/bluetooth/lib/common/test_helpers.h"
 #include "gtest/gtest.h"
 
-namespace bluetooth {
+namespace btlib {
 namespace att {
 namespace {
 
@@ -212,4 +212,4 @@ TEST(ATT_AttributeTest, GroupingAddAttribute) {
 
 }  // namespace
 }  // namespace att
-}  // namespace bluetooth
+}  // namespace btlib

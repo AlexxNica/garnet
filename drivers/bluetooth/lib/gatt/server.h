@@ -9,7 +9,7 @@
 #include "lib/fxl/macros.h"
 #include "lib/fxl/memory/ref_ptr.h"
 
-namespace bluetooth {
+namespace btlib {
 
 namespace att {
 class Database;
@@ -55,4 +55,4 @@ class Server final {
 };
 
 }  // namespace gatt
-}  // namespace bluetooth
+}  // namespace btlib
