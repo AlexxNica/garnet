@@ -24,6 +24,9 @@ Server::Server(fxl::RefPtr<att::Database> database,
 
   exchange_mtu_id_ = att_->RegisterTransactionHandler(
       att::kExchangeMTURequest, fbl::BindMember(this, &Server::OnExchangeMTU));
+  find_information_id_ = att_->RegisterTransactionHandler(
+      att::kFindInformationRequest,
+      fbl::BindMember(this, &Server::OnFindInformation));
   read_by_group_type_id_ = att_->RegisterTransactionHandler(
       att::kReadByGroupTypeRequest,
       fbl::BindMember(this, &Server::OnReadByGroupType));
@@ -34,6 +37,7 @@ Server::Server(fxl::RefPtr<att::Database> database,
 Server::~Server() {
   att_->UnregisterHandler(read_by_type_id_);
   att_->UnregisterHandler(read_by_group_type_id_);
+  att_->UnregisterHandler(find_information_id_);
   att_->UnregisterHandler(exchange_mtu_id_);
 }
 
@@ -65,6 +69,62 @@ void Server::OnExchangeMTU(att::Bearer::TransactionId tid,
   // TODO(armansito): This needs to use on kBREDRMinATTMTU for BR/EDR. Make the
   // default MTU configurable.
   att_->set_mtu(std::max(att::kLEMinMTU, std::min(client_mtu, server_mtu)));
+}
+
+void Server::OnFindInformation(att::Bearer::TransactionId tid,
+                               const att::PacketReader& packet) {
+  FXL_DCHECK(packet.opcode() == att::kFindInformationRequest);
+
+  if (packet.payload_size() != sizeof(att::FindInformationRequestParams)) {
+    att_->ReplyWithError(tid, att::kInvalidHandle, att::ErrorCode::kInvalidPDU);
+    return;
+  }
+
+  const auto& params = packet.payload<att::FindInformationRequestParams>();
+  att::Handle start = le16toh(params.start_handle);
+  att::Handle end = le16toh(params.end_handle);
+
+  constexpr size_t kRspStructSize = sizeof(att::FindInformationResponseParams);
+  constexpr size_t kHeaderSize = sizeof(att::Header) + kRspStructSize;
+  FXL_DCHECK(kHeaderSize <= att_->mtu());
+
+  std::list<const att::Attribute*> results;
+  auto error_code =
+      db_->FindInformation(start, end, att_->mtu() - kHeaderSize, &results);
+  if (error_code != att::ErrorCode::kNoError) {
+    att_->ReplyWithError(tid, start, error_code);
+    return;
+  }
+
+  FXL_DCHECK(!results.empty());
+
+  size_t entry_size = sizeof(att::Handle) + results.front()->type().CompactSize(
+                                                false /* allow32_bit */);
+  size_t pdu_size = kHeaderSize + entry_size * results.size();
+
+  auto buffer = common::NewSlabBuffer(pdu_size);
+  FXL_CHECK(buffer);
+
+  att::PacketWriter writer(att::kFindInformationResponse, buffer.get());
+  auto rsp_params =
+      writer.mutable_payload<att::FindInformationResponseParams>();
+  rsp_params->format =
+      (entry_size == 4) ? att::UUIDType::k16Bit : att::UUIDType::k128Bit;
+
+  // |out_entries| initially references |params->information_data|. The loop
+  // below modifies it as entries are written into the list.
+  auto out_entries = writer.mutable_payload_data().mutable_view(kRspStructSize);
+  for (const auto& attr : results) {
+    *reinterpret_cast<att::Handle*>(out_entries.mutable_data()) =
+        htole16(attr->handle());
+    auto uuid_view = out_entries.mutable_view(sizeof(att::Handle));
+    attr->type().ToBytes(&uuid_view, false /* allow32_bit */);
+
+    // advance
+    out_entries = out_entries.mutable_view(entry_size);
+  }
+
+  att_->EndTransaction(tid, std::move(buffer));
 }
 
 void Server::OnReadByGroupType(att::Bearer::TransactionId tid,
