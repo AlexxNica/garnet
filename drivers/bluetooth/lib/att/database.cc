@@ -91,6 +91,73 @@ bool Database::RemoveGrouping(Handle start_handle) {
   return true;
 }
 
+ErrorCode Database::FindInformation(Handle start_handle,
+                                    Handle end_handle,
+                                    uint16_t max_payload_size,
+                                    std::list<const Attribute*>* out_results) {
+  FXL_DCHECK(out_results);
+
+  // Should be large enough to accomodate at least one entry with a non-empty
+  // value (NOTE: in production this will be at least equal to
+  // l2cap::kMinLEMTU). Smaller values are allowed for unit tests.
+  FXL_DCHECK(max_payload_size > sizeof(InformationData128));
+
+  if (start_handle == kInvalidHandle || start_handle > end_handle)
+    return ErrorCode::kInvalidHandle;
+
+  std::list<const Attribute*> results;
+
+  // Find the first overlapping grouping.
+  auto iter = std::lower_bound(groupings_.begin(), groupings_.end(),
+                               start_handle, EndLessThan);
+  if (iter == groupings_.end() || iter->start_handle() > end_handle)
+    return ErrorCode::kAttributeNotFound;
+
+  size_t uuid_size;
+  size_t entry_size;
+  bool done = false;
+  for (; iter != groupings_.end() && !done; ++iter) {
+    if (iter->start_handle() > end_handle)
+      break;
+
+    if (!iter->active() || !iter->complete())
+      continue;
+
+    // Search the attributes in the current grouping that are within the
+    // requested range.
+    Handle search_start = std::max(iter->start_handle(), start_handle);
+    Handle search_end = std::min(iter->end_handle(), end_handle);
+
+    size_t index = search_start - iter->start_handle();
+    size_t end_index = search_end - iter->start_handle();
+    FXL_DCHECK(end_index < iter->attributes().size());
+
+    for (; index <= end_index && !done; ++index) {
+      const auto& attr = iter->attributes()[index];
+      size_t compact_size = attr.type().CompactSize(false /* allow_32bit */);
+
+      if (results.empty()) {
+        // The compact size of the first attribute type determines |uuid_size|.
+        uuid_size = compact_size;
+        entry_size = std::min(uuid_size + sizeof(Handle),
+                              static_cast<size_t>(max_payload_size));
+      } else if (compact_size != uuid_size || entry_size > max_payload_size) {
+        done = true;
+        break;
+      }
+
+      results.push_back(&attr);
+      max_payload_size -= entry_size;
+    }
+  }
+
+  if (results.empty())
+    return ErrorCode::kAttributeNotFound;
+
+  *out_results = std::move(results);
+  return ErrorCode::kNoError;
+}
+
 ErrorCode Database::ReadByGroupType(
     Handle start_handle,
     Handle end_handle,

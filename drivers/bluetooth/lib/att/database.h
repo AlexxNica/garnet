@@ -65,6 +65,21 @@ class Database final : public fxl::RefCountedThreadSafe<Database> {
   // false if no such grouping was found.
   bool RemoveGrouping(Handle start_handle);
 
+  // Finds attributes within the given handle range and returns them in
+  // |out_results|. If multiple attributes are returned, the types of these
+  // attributes will have the same compact size (either 16-bit or 128-bit).
+  //
+  // This will return as many results as can possibly be returned in a Find
+  // Information Response PDU with the given |max_payload_size|.
+  //
+  // The results are returned in ascending order of handle value.
+  //
+  // The returned error code can be used in an Error Response PDU.
+  ErrorCode FindInformation(Handle start_handle,
+                            Handle end_handle,
+                            uint16_t max_payload_size,
+                            std::list<const Attribute*>* out_results);
+
   // Finds attribute groupings within the range defined by |start_handle| and
   // |end_handle| that match |group_type|. This method will include as many
   // matching groupings as possible in accordance with the Read By Group Type
@@ -117,7 +132,6 @@ class Database final : public fxl::RefCountedThreadSafe<Database> {
   // TODO(armansito): Add lookup functions:
   //   * FindAttribute(Handle);
   //   * FindByTypeValue
-  //   * FindInformation
 
  private:
   FRIEND_REF_COUNTED_THREAD_SAFE(Database);

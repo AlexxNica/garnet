@@ -17,6 +17,9 @@ constexpr uint16_t kDefaultMTU = 23;
 
 constexpr common::UUID kTestType1((uint16_t)1);
 constexpr common::UUID kTestType2((uint16_t)2);
+constexpr common::UUID kTestType32((uint32_t)0xDEADBEEF);
+constexpr common::UUID kTestType128({0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+                                     13, 14, 15});
 
 inline AccessRequirements AllowedNoSecurity() {
   return AccessRequirements(false, false, false);
@@ -133,6 +136,136 @@ TEST(ATT_DatabaseTest, NewGroupingMultipleInsertions) {
 TEST(ATT_DatabaseTest, RemoveWhileEmpty) {
   auto db = Database::Create(kTestRangeStart, kTestRangeEnd);
   EXPECT_FALSE(db->RemoveGrouping(kTestRangeStart));
+}
+
+TEST(ATT_DatabaseTest, FindInformationInvalidHandle) {
+  auto db = Database::Create(kTestRangeStart, kTestRangeEnd);
+  std::list<const Attribute*> results;
+
+  // Handle is 0.
+  EXPECT_EQ(ErrorCode::kInvalidHandle,
+            db->FindInformation(kInvalidHandle, kTestRangeEnd, kDefaultMTU,
+                                &results));
+  EXPECT_EQ(ErrorCode::kInvalidHandle,
+            db->FindInformation(kTestRangeStart, kInvalidHandle, kDefaultMTU,
+                                &results));
+
+  // end > start
+  EXPECT_EQ(ErrorCode::kInvalidHandle,
+            db->FindInformation(kTestRangeStart + 1, kTestRangeStart,
+                                kDefaultMTU, &results));
+}
+
+TEST(ATT_DatabaseTest, FindInformationEmpty) {
+  auto db = Database::Create(kTestRangeStart, kTestRangeEnd);
+  std::list<const Attribute*> results;
+
+  EXPECT_EQ(ErrorCode::kAttributeNotFound,
+            db->FindInformation(kTestRangeStart, kTestRangeEnd, kDefaultMTU,
+                                &results));
+}
+
+TEST(ATT_DatabaseTest, FindInformationGroupingOutOfRange) {
+  constexpr size_t kPadding = 3;
+  auto db = Database::Create(kTestRangeStart, kTestRangeEnd);
+
+  db->NewGrouping(kTestType1, kPadding, kTestValue1);
+  auto* grp = db->NewGrouping(kTestType2, 0, kTestValue1);
+  grp->set_active(true);
+
+  std::list<const Attribute*> results;
+
+  // Search before
+  EXPECT_EQ(ErrorCode::kAttributeNotFound,
+            db->FindInformation(kTestRangeStart, grp->start_handle() - 1,
+                                kDefaultMTU, &results));
+
+  // Search after
+  EXPECT_EQ(ErrorCode::kAttributeNotFound,
+            db->FindInformation(grp->end_handle() + 1, kTestRangeEnd,
+                                kDefaultMTU, &results));
+}
+
+TEST(ATT_DatabaseTest, FindInformationIncomplete) {
+  auto db = Database::Create(kTestRangeStart, kTestRangeEnd);
+  std::list<const Attribute*> results;
+
+  // The grouping contains a matching attribute but is incomplete.
+  auto* grp = db->NewGrouping(kTestType1, 2, kTestValue1);
+  grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements());
+
+  EXPECT_EQ(ErrorCode::kAttributeNotFound,
+            db->FindInformation(kTestRangeStart, kTestRangeEnd, kDefaultMTU,
+                                &results));
+}
+
+TEST(ATT_DatabaseTest, FindInformationInactive) {
+  auto db = Database::Create(kTestRangeStart, kTestRangeEnd);
+  std::list<const Attribute*> results;
+
+  // Complete but inactive.
+  auto* grp = db->NewGrouping(kTestType1, 1, kTestValue1);
+  grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements());
+
+  EXPECT_EQ(ErrorCode::kAttributeNotFound,
+            db->FindInformation(kTestRangeStart, kTestRangeEnd, kDefaultMTU,
+                                &results));
+}
+
+TEST(ATT_DatabaseTest, FindInformation16) {
+  auto db = Database::Create(kTestRangeStart, kTestRangeEnd);
+  std::list<const Attribute*> results;
+
+  // Insert attributes spanning two groupings.
+  // Results should exclude the last attribute which has a 128-bit UUID. The
+  // group declaration and the second attribute will be included.
+  auto* grp = db->NewGrouping(kTestType1, 1, kTestValue1);
+  grp->AddAttribute(kTestType2, AccessRequirements(), AccessRequirements());
+  grp->set_active(true);
+
+  grp = db->NewGrouping(kTestType128, 0, kTestValue1);
+  grp->set_active(true);
+
+  EXPECT_EQ(ErrorCode::kNoError,
+            db->FindInformation(kTestRangeStart, kTestRangeEnd, kDefaultMTU,
+                                &results));
+  ASSERT_EQ(2u, results.size());
+  EXPECT_EQ(kTestRangeStart, results.front()->handle());
+  EXPECT_EQ(kTestRangeStart + 1, results.back()->handle());
+}
+
+TEST(ATT_DatabaseTest, FindInformation128) {
+  auto db = Database::Create(kTestRangeStart, kTestRangeEnd);
+  std::list<const Attribute*> results;
+
+  // Insert attributes spanning two groupings.
+  // Results should exclude the last attribute which has a 16-bit UUID.
+  auto* grp = db->NewGrouping(kTestType128, 1, kTestValue1);
+  grp->AddAttribute(kTestType32, AccessRequirements(), AccessRequirements());
+  grp->set_active(true);
+
+  grp = db->NewGrouping(kTestType128, 1, kTestValue1);
+  grp->AddAttribute(kTestType2, AccessRequirements(), AccessRequirements());
+  grp->set_active(true);
+
+  // Make the MTU comfortably large.
+  constexpr uint16_t kMTU = 0xFFFF;
+
+  // Results should include the first 3 attributes.
+  EXPECT_EQ(
+      ErrorCode::kNoError,
+      db->FindInformation(kTestRangeStart, kTestRangeEnd, kMTU, &results));
+  ASSERT_EQ(3u, results.size());
+  EXPECT_EQ(kTestRangeStart, results.front()->handle());
+  EXPECT_EQ(kTestRangeStart + 2, results.back()->handle());
+
+  // Using the default MTU should fit only one result.
+  results.clear();
+  EXPECT_EQ(ErrorCode::kNoError,
+            db->FindInformation(kTestRangeStart, kTestRangeEnd, kDefaultMTU,
+                                &results));
+  ASSERT_EQ(1u, results.size());
+  EXPECT_EQ(kTestRangeStart, results.front()->handle());
 }
 
 TEST(ATT_DatabaseTest, ReadByGroupTypeInvalidHandle) {
