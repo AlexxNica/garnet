@@ -8,6 +8,7 @@
 
 #include "lib/fxl/macros.h"
 #include "lib/fxl/memory/ref_ptr.h"
+#include "lib/fxl/memory/weak_ptr.h"
 
 namespace btlib {
 
@@ -43,6 +44,8 @@ class Server final {
                      const att::PacketReader& packet);
   void OnReadByGroupType(att::Bearer::TransactionId tid,
                          const att::PacketReader& packet);
+  void OnReadByType(att::Bearer::TransactionId tid,
+                    const att::PacketReader& packet);
 
   fxl::RefPtr<att::Database> db_;
   fxl::RefPtr<att::Bearer> att_;
@@ -50,6 +53,9 @@ class Server final {
   // ATT protocol request handler IDs
   att::Bearer::HandlerId exchange_mtu_id_;
   att::Bearer::HandlerId read_by_group_type_id_;
+  att::Bearer::HandlerId read_by_type_id_;
+
+  fxl::WeakPtrFactory<Server> weak_ptr_factory_;
 
   FXL_DISALLOW_COPY_AND_ASSIGN(Server);
 };
