@@ -65,6 +65,11 @@ class Database final : public fxl::RefCountedThreadSafe<Database> {
   // false if no such grouping was found.
   bool RemoveGrouping(Handle start_handle);
 
+  // Finds and returns the attribute with the given handle. Returns nullptr if
+  // the attribute cannot be found or is found a of a grouping that is inactive
+  // or incomplete.
+  const Attribute* FindAttribute(Handle handle);
+
   // Finds attributes within the given handle range and returns them in
   // |out_results|. If multiple attributes are returned, the types of these
   // attributes will have the same compact size (either 16-bit or 128-bit).
@@ -130,7 +135,6 @@ class Database final : public fxl::RefCountedThreadSafe<Database> {
   const std::list<AttributeGrouping>& groupings() const { return groupings_; }
 
   // TODO(armansito): Add lookup functions:
-  //   * FindAttribute(Handle);
   //   * FindByTypeValue
 
  private:
