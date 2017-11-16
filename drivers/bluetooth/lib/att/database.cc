@@ -16,6 +16,10 @@ bool StartLessThan(const AttributeGrouping& grp, const Handle handle) {
   return grp.start_handle() < handle;
 }
 
+bool EndLessThan(const AttributeGrouping& grp, const Handle handle) {
+  return grp.end_handle() < handle;
+}
+
 }  // namespace
 
 Database::Database(Handle range_start, Handle range_end)
@@ -105,7 +109,9 @@ ErrorCode Database::ReadByGroupType(
 
   std::list<AttributeGrouping*> results;
 
-  // Find the first grouping with start >= |start_handle|
+  // Find the first grouping with start >= |start_handle|. The group type and
+  // the resulting value is always obtained from the first handle of an
+  // attribute grouping.
   auto iter = std::lower_bound(groupings_.begin(), groupings_.end(),
                                start_handle, StartLessThan);
   if (iter == groupings_.end() || iter->start_handle() > end_handle)
@@ -156,6 +162,124 @@ ErrorCode Database::ReadByGroupType(
 
     results.push_back(&*iter);
     max_payload_size -= entry_size;
+  }
+
+  if (results.empty())
+    return ErrorCode::kAttributeNotFound;
+
+  *out_results = std::move(results);
+  return ErrorCode::kNoError;
+}
+
+ErrorCode Database::ReadByType(Handle start_handle,
+                               Handle end_handle,
+                               const common::UUID& type,
+                               uint16_t max_payload_size,
+                               std::list<const Attribute*>* out_results) {
+  FXL_DCHECK(out_results);
+
+  // Should be large enough to accomodate at least one entry with a non-empty
+  // value (NOTE: in production this will be at least equal to
+  // l2cap::kMinLEMTU). Smaller values are allowed for unit tests.
+  FXL_DCHECK(max_payload_size > sizeof(AttributeData));
+
+  if (start_handle == kInvalidHandle || start_handle > end_handle)
+    return ErrorCode::kInvalidHandle;
+
+  std::list<const Attribute*> results;
+
+  // Find the first grouping that overlaps the requested range (i.e.
+  // grouping->end_handle() >= |start_handle|).
+  auto iter = std::lower_bound(groupings_.begin(), groupings_.end(),
+                               start_handle, EndLessThan);
+  if (iter == groupings_.end() || iter->start_handle() > end_handle)
+    return ErrorCode::kAttributeNotFound;
+
+  // |value_size| is the size of the attribute value contained in each resulting
+  // AttributeData entry. |entry_size| = |value_size| + sizeof(Handle) (i.e. the
+  // exact size of each AttributeData entry). We track these separately to avoid
+  // recalculating one every time.
+  size_t value_size;
+  size_t entry_size;
+
+  // Used by the inner loop to exit the outer loop in the case of early
+  // termination.
+  bool done = false;
+  for (; iter != groupings_.end() && !done; ++iter) {
+    // Exit the loop if the grouping is out of range.
+    if (iter->start_handle() > end_handle)
+      break;
+
+    // Skip inactive or incomplete groupings.
+    if (!iter->active() || !iter->complete())
+      continue;
+
+    // Search the attributes in the current grouping that are within the
+    // requested range.
+    Handle search_start = std::max(iter->start_handle(), start_handle);
+    Handle search_end = std::min(iter->end_handle(), end_handle);
+
+    size_t index = search_start - iter->start_handle();
+    size_t end_index = search_end - iter->start_handle();
+    FXL_DCHECK(end_index < iter->attributes().size());
+
+    for (; index <= end_index && !done; ++index) {
+      const auto& attr = iter->attributes()[index];
+      if (attr.type() != type)
+        continue;
+
+      // TODO(armansito): Compare against the actual connection security level
+      // here. For now allow only attributes that require no security.
+      if (!attr.read_reqs().allowed_without_security()) {
+        // Return error if this attribute would cause an error and this is the
+        // first grouping that matched.
+        //
+        // TODO(armansito): Return correct error based on security check.
+        if (results.empty())
+          return ErrorCode::kReadNotPermitted;
+
+        // Terminate the request with what has been found.
+        done = true;
+        break;
+      }
+
+      // The first result determines |value_size| and |entry_size|.
+      if (results.empty()) {
+        // If this is a static attribute (i.e. its value is present in the
+        // database):
+        if (attr.value()) {
+          // The size of the complete first attribute value. All other matching
+          // attributes need to have this size.
+          value_size = attr.value()->size();
+
+          // The actual size of the attribute data entry that this attribute
+          // would produce. This is both bounded by |max_payload_size| and the
+          // maximum value size that a Read By Type Response can accomodate.
+          entry_size = std::min(value_size,
+                                static_cast<size_t>(kMaxReadByTypeValueLength));
+          entry_size = std::min(entry_size + sizeof(AttributeData),
+                                static_cast<size_t>(max_payload_size));
+        } else {
+          // If the first value is dynamic then this is the only attribute that
+          // this call will return. No need to calculate |entry_size|. The entry
+          // will be added to |results| below.
+          done = true;
+        }
+      } else if (!attr.value() || attr.value()->size() != value_size ||
+                 entry_size > max_payload_size) {
+        // Stop the search and exclude this attribute because:
+        // a. we ran into a dynamic value in a result that contains static
+        //    values, OR
+        // b. the matching attribute has a different value size than the first
+        //    attribute, OR
+        // c. there is no remaning space in the response PDU.
+        done = true;
+        break;
+      }
+
+      results.push_back(&attr);
+      max_payload_size -= entry_size;
+    }
   }
 
   if (results.empty())

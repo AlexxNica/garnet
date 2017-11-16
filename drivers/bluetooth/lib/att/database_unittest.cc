@@ -18,6 +18,10 @@ constexpr uint16_t kDefaultMTU = 23;
 constexpr common::UUID kTestType1((uint16_t)1);
 constexpr common::UUID kTestType2((uint16_t)2);
 
+inline AccessRequirements AllowedNoSecurity() {
+  return AccessRequirements(false, false, false);
+}
+
 // Values with different lengths
 const auto kTestValue1 = common::CreateStaticByteBuffer('x', 'x');
 const auto kTestValue2 = common::CreateStaticByteBuffer('x', 'x', 'x');
@@ -361,6 +365,430 @@ TEST(ATT_DatabaseTest, ReadByGroupTypeFirstValueExceedsMTU) {
 
   ASSERT_EQ(1u, results.size());
   EXPECT_EQ(match_handle, results.front()->start_handle());
+}
+
+TEST(ATT_DatabaseTest, ReadByTypeInvalidHandle) {
+  auto db = Database::Create(kTestRangeStart, kTestRangeEnd);
+  std::list<const Attribute*> results;
+
+  // Handle is 0.
+  EXPECT_EQ(ErrorCode::kInvalidHandle,
+            db->ReadByType(kInvalidHandle, kTestRangeEnd, kTestType1,
+                           kDefaultMTU, &results));
+  EXPECT_EQ(ErrorCode::kInvalidHandle,
+            db->ReadByType(kTestRangeStart, kInvalidHandle, kTestType1,
+                           kDefaultMTU, &results));
+
+  // end > start
+  EXPECT_EQ(ErrorCode::kInvalidHandle,
+            db->ReadByType(kTestRangeStart + 1, kTestRangeStart, kTestType1,
+                           kDefaultMTU, &results));
+}
+
+TEST(ATT_DatabaseTest, ReadByTypeEmpty) {
+  auto db = Database::Create(kTestRangeStart, kTestRangeEnd);
+  std::list<const Attribute*> results;
+
+  EXPECT_EQ(ErrorCode::kAttributeNotFound,
+            db->ReadByType(kTestRangeStart, kTestRangeEnd, kTestType1,
+                           kDefaultMTU, &results));
+}
+
+TEST(ATT_DatabaseTest, ReadByTypeGroupingOutOfRange) {
+  constexpr size_t kPadding = 3;
+  auto db = Database::Create(kTestRangeStart, kTestRangeEnd);
+
+  db->NewGrouping(kTestType1, kPadding, kTestValue1);
+  auto* grp = db->NewGrouping(kTestType2, 0, kTestValue1);
+  grp->set_active(true);
+
+  std::list<const Attribute*> results;
+
+  // Search before
+  EXPECT_EQ(ErrorCode::kAttributeNotFound,
+            db->ReadByType(kTestRangeStart, grp->start_handle() - 1, kTestType2,
+                           kDefaultMTU, &results));
+
+  // Search after
+  EXPECT_EQ(ErrorCode::kAttributeNotFound,
+            db->ReadByType(grp->end_handle() + 1, kTestRangeEnd, kTestType2,
+                           kDefaultMTU, &results));
+}
+
+TEST(ATT_DatabaseTest, ReadByTypeOutOfRangeWithinGrouping) {
+  auto db = Database::Create(kTestRangeStart, kTestRangeEnd);
+  std::list<const Attribute*> results;
+
+  // Create the following grouping layout:
+  //   start: |kTestType1|
+  //       -: |kTestType2| <-- search for this
+  //     end: |kTestType1|
+  auto* grp = db->NewGrouping(kTestType1, 2, kTestValue1);
+  grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements());
+  grp->AddAttribute(kTestType1, AllowedNoSecurity(), AccessRequirements());
+  grp->set_active(true);
+
+  // Search before
+  EXPECT_EQ(ErrorCode::kAttributeNotFound,
+            db->ReadByType(grp->start_handle(), grp->start_handle(), kTestType2,
+                           kDefaultMTU, &results));
+
+  // Search after
+  EXPECT_EQ(ErrorCode::kAttributeNotFound,
+            db->ReadByType(grp->end_handle(), grp->end_handle(), kTestType2,
+                           kDefaultMTU, &results));
+}
+
+TEST(ATT_DatabaseTest, ReadByTypeIncomplete) {
+  auto db = Database::Create(kTestRangeStart, kTestRangeEnd);
+  std::list<const Attribute*> results;
+
+  // The grouping contains a matching attribute but is incomplete.
+  auto* grp = db->NewGrouping(kTestType1, 2, kTestValue1);
+  grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements());
+
+  EXPECT_EQ(ErrorCode::kAttributeNotFound,
+            db->ReadByType(kTestRangeStart, kTestRangeEnd, kTestType2,
+                           kDefaultMTU, &results));
+}
+
+TEST(ATT_DatabaseTest, ReadByTypeInactive) {
+  auto db = Database::Create(kTestRangeStart, kTestRangeEnd);
+  std::list<const Attribute*> results;
+
+  // Complete but inactive.
+  auto* grp = db->NewGrouping(kTestType1, 1, kTestValue1);
+  grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements());
+
+  EXPECT_EQ(ErrorCode::kAttributeNotFound,
+            db->ReadByType(kTestRangeStart, kTestRangeEnd, kTestType2,
+                           kDefaultMTU, &results));
+}
+
+TEST(ATT_DatabaseTest, ReadByTypeSingleStatic) {
+  auto db = Database::Create(kTestRangeStart, kTestRangeEnd);
+  std::list<const Attribute*> results;
+
+  auto* grp = db->NewGrouping(kTestType1, 1, kTestValue1);
+  auto* attr =
+      grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements());
+  attr->SetValue(kTestValue2);
+  grp->set_active(true);
+
+  EXPECT_EQ(ErrorCode::kNoError,
+            db->ReadByType(kTestRangeStart, kTestRangeEnd, kTestType2,
+                           kDefaultMTU, &results));
+  ASSERT_EQ(1u, results.size());
+  EXPECT_EQ(attr, results.front());
+}
+
+// The start and end handles exactly match the requested attributes.
+TEST(ATT_DatabaseTest, ReadByTypeSingleStaticExactRange) {
+  auto db = Database::Create(kTestRangeStart, kTestRangeEnd);
+  std::list<const Attribute*> results;
+
+  auto* grp = db->NewGrouping(kTestType1, 1, kTestValue1);
+  auto* attr =
+      grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements());
+  attr->SetValue(kTestValue2);
+  grp->set_active(true);
+
+  EXPECT_EQ(ErrorCode::kNoError,
+            db->ReadByType(attr->handle(), attr->handle(), kTestType2,
+                           kDefaultMTU, &results));
+  ASSERT_EQ(1u, results.size());
+  EXPECT_EQ(attr, results.front());
+}
+
+TEST(ATT_DatabaseTest, ReadByTypeSingleDynamic) {
+  auto db = Database::Create(kTestRangeStart, kTestRangeEnd);
+  std::list<const Attribute*> results;
+
+  auto* grp = db->NewGrouping(kTestType1, 1, kTestValue1);
+  auto* attr =
+      grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements());
+  grp->set_active(true);
+
+  EXPECT_EQ(ErrorCode::kNoError,
+            db->ReadByType(kTestRangeStart, kTestRangeEnd, kTestType2,
+                           kDefaultMTU, &results));
+  ASSERT_EQ(1u, results.size());
+  EXPECT_EQ(attr, results.front());
+}
+
+// The start and end handles exactly match the requested attributes.
+TEST(ATT_DatabaseTest, ReadByTypeSingleDynamicExactRange) {
+  auto db = Database::Create(kTestRangeStart, kTestRangeEnd);
+  std::list<const Attribute*> results;
+
+  auto* grp = db->NewGrouping(kTestType1, 1, kTestValue1);
+  auto* attr =
+      grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements());
+  grp->set_active(true);
+
+  EXPECT_EQ(ErrorCode::kNoError,
+            db->ReadByType(attr->handle(), attr->handle(), kTestType2,
+                           kDefaultMTU, &results));
+  ASSERT_EQ(1u, results.size());
+  EXPECT_EQ(attr, results.front());
+}
+
+TEST(ATT_DatabaseTest, ReadByTypeErrorSecurity) {
+  auto db = Database::Create(kTestRangeStart, kTestRangeEnd);
+  std::list<const Attribute*> results;
+
+  auto* grp = db->NewGrouping(kTestType1, 4, kTestValue1);
+
+  // Doesn't allow reads
+  grp->AddAttribute(kTestType2, AccessRequirements(), AccessRequirements())->SetValue(kTestValue1);
+
+  // Allows reads.
+  auto* attr = grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements());
+  attr->SetValue(kTestValue1);
+
+  // Doesn't allow reads
+  grp->AddAttribute(kTestType2, AccessRequirements(), AccessRequirements())->SetValue(kTestValue1);
+
+  // Allows reads.
+  grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements())->SetValue(kTestValue1);
+
+  grp->set_active(true);
+
+  // The search should stop with the first attribute that causes an error.
+  EXPECT_EQ(ErrorCode::kReadNotPermitted,
+            db->ReadByType(kTestRangeStart, kTestRangeEnd, kTestType2,
+                           kDefaultMTU, &results));
+
+  // Do a second search starting at |attr|. The search will stop on the next
+  // attribute that causes an error and the results will only include |attr|.
+  EXPECT_EQ(ErrorCode::kNoError,
+            db->ReadByType(attr->handle(), kTestRangeEnd, kTestType2,
+                           kDefaultMTU, &results));
+  ASSERT_EQ(1u, results.size());
+  EXPECT_EQ(attr, results.front());
+}
+
+// Test that at most one dynamic attribute is returned.
+TEST(ATT_DatabaseTest, ReadByTypeDynamicOneResultOnly) {
+  auto db = Database::Create(kTestRangeStart, kTestRangeEnd);
+  std::list<const Attribute*> results;
+
+  auto* grp = db->NewGrouping(kTestType1, 4, kTestValue1);
+
+  // Dynamic followed by dynamic
+  auto* attr1 =
+      grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements());
+  grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements());
+
+  // Dynamic followed by static
+  auto* attr2 =
+      grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements());
+  grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements())
+      ->SetValue(kTestValue1);
+
+  grp->set_active(true);
+
+  EXPECT_EQ(ErrorCode::kNoError,
+            db->ReadByType(kTestRangeStart, kTestRangeEnd, kTestType2,
+                           kDefaultMTU, &results));
+  ASSERT_EQ(1u, results.size());
+  EXPECT_EQ(attr1, results.front());
+
+  results.clear();
+  EXPECT_EQ(ErrorCode::kNoError,
+            db->ReadByType(attr2->handle(), kTestRangeEnd, kTestType2,
+                           kDefaultMTU, &results));
+  ASSERT_EQ(1u, results.size());
+  EXPECT_EQ(attr2, results.front());
+}
+
+TEST(ATT_DatabaseTest, ReadByTypeStaticValueExceedsMTU) {
+  auto db = Database::Create(kTestRangeStart, kTestRangeEnd);
+  std::list<const Attribute*> results;
+
+  // Add two attributes of equal type and value length. The second one will be
+  // mitted as it won't fit in the payload.
+  auto* grp = db->NewGrouping(kTestType1, 2, kTestValue1);
+  grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements())
+      ->SetValue(kTestValue1);
+  grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements())
+      ->SetValue(kTestValue1);
+  grp->set_active(true);
+
+  // Just one octet short.
+  const uint16_t kMTU = (kTestValue1.size() + sizeof(AttributeData)) * 2 - 1;
+
+  EXPECT_EQ(ErrorCode::kNoError, db->ReadByType(kTestRangeStart, kTestRangeEnd,
+                                                kTestType2, kMTU, &results));
+  ASSERT_EQ(1u, results.size());
+  EXPECT_EQ(grp->start_handle() + 1, results.front()->handle());
+}
+
+TEST(ATT_DatabaseTest, ReadByTypeStaticMultiple) {
+  auto db = Database::Create(kTestRangeStart, kTestRangeEnd);
+  std::list<const Attribute*> results;
+
+  // Add two attributes of equal type and value length.
+  auto* grp = db->NewGrouping(kTestType1, 2, kTestValue1);
+  auto* attr1 =
+      grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements());
+  attr1->SetValue(kTestValue1);
+  auto* attr2 =
+      grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements());
+  attr2->SetValue(kTestValue1);
+  grp->set_active(true);
+
+  EXPECT_EQ(ErrorCode::kNoError,
+            db->ReadByType(kTestRangeStart, kTestRangeEnd, kTestType2,
+                           kDefaultMTU, &results));
+  ASSERT_EQ(2u, results.size());
+  EXPECT_EQ(attr1, results.front());
+  EXPECT_EQ(attr2, results.back());
+}
+
+TEST(ATT_DatabaseTest, ReadByTypeStaticMultipleBoundByMTU) {
+  auto db = Database::Create(kTestRangeStart, kTestRangeEnd);
+  std::list<const Attribute*> results;
+
+  // Add three attributes of equal type and value length. The third attribute
+  // will be omitted as it won't fit.
+  auto* grp = db->NewGrouping(kTestType1, 3, kTestValue1);
+  auto* attr1 =
+      grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements());
+  attr1->SetValue(kTestValue1);
+  auto* attr2 =
+      grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements());
+  attr2->SetValue(kTestValue1);
+  grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements())
+      ->SetValue(kTestValue1);
+  grp->set_active(true);
+
+  // One octet short
+  const uint16_t kMTU = (kTestValue1.size() + sizeof(AttributeData)) * 3 - 1;
+
+  EXPECT_EQ(ErrorCode::kNoError, db->ReadByType(kTestRangeStart, kTestRangeEnd,
+                                                kTestType2, kMTU, &results));
+  ASSERT_EQ(2u, results.size());
+  EXPECT_EQ(attr1, results.front());
+  EXPECT_EQ(attr2, results.back());
+}
+
+TEST(ATT_DatabaseTest, ReadByTypeStaticEndsAtFirstDynamic) {
+  auto db = Database::Create(kTestRangeStart, kTestRangeEnd);
+  std::list<const Attribute*> results;
+
+  auto* grp = db->NewGrouping(kTestType1, 3, kTestValue1);
+  auto* attr1 =
+      grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements());
+  attr1->SetValue(kTestValue1);
+  auto* attr2 =
+      grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements());
+  attr2->SetValue(kTestValue1);
+
+  // The results will end at the first dynamic attribute.
+  grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements());
+  grp->set_active(true);
+
+  EXPECT_EQ(ErrorCode::kNoError,
+            db->ReadByType(kTestRangeStart, kTestRangeEnd, kTestType2,
+                           kDefaultMTU, &results));
+  ASSERT_EQ(2u, results.size());
+  EXPECT_EQ(attr1, results.front());
+  EXPECT_EQ(attr2, results.back());
+}
+
+TEST(ATT_DatabaseTest, ReadByTypeStaticEndsAtFirstDifferentLength) {
+  auto db = Database::Create(kTestRangeStart, kTestRangeEnd);
+  std::list<const Attribute*> results;
+
+  auto* grp = db->NewGrouping(kTestType1, 3, kTestValue1);
+  auto* attr1 =
+      grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements());
+  attr1->SetValue(kTestValue1);
+  auto* attr2 =
+      grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements());
+  attr2->SetValue(kTestValue1);
+
+  // The results will end at the first attribute with a different value length.
+  grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements())
+      ->SetValue(kTestValue2);
+  grp->set_active(true);
+
+  EXPECT_EQ(ErrorCode::kNoError,
+            db->ReadByType(kTestRangeStart, kTestRangeEnd, kTestType2,
+                           kDefaultMTU, &results));
+  ASSERT_EQ(2u, results.size());
+  EXPECT_EQ(attr1, results.front());
+  EXPECT_EQ(attr2, results.back());
+}
+
+TEST(ATT_DatabaseTest, ReadByTypeSpanningMultipleGroupings) {
+  auto db = Database::Create(kTestRangeStart, kTestRangeEnd);
+  std::list<const Attribute*> results;
+
+  // Empty grouping
+  db->NewGrouping(kTestType1, 0, kTestValue1)->set_active(true);
+
+  // Grouping containing the first result
+  auto* grp = db->NewGrouping(kTestType1, 1, kTestValue1);
+  auto* attr1 =
+      grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements());
+  attr1->SetValue(kTestValue1);
+  grp->set_active(true);
+
+  // Empty grouping
+  db->NewGrouping(kTestType1, 0, kTestValue1)->set_active(true);
+
+  // Grouping containing the second result
+  grp = db->NewGrouping(kTestType1, 1, kTestValue1);
+  auto* attr2 =
+      grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements());
+  attr2->SetValue(kTestValue1);
+  grp->set_active(true);
+
+  // Empty grouping
+  db->NewGrouping(kTestType1, 0, kTestValue1)->set_active(true);
+
+  EXPECT_EQ(ErrorCode::kNoError,
+            db->ReadByType(kTestRangeStart, kTestRangeEnd, kTestType2,
+                           kDefaultMTU, &results));
+  ASSERT_EQ(2u, results.size());
+  EXPECT_EQ(attr1, results.front());
+  EXPECT_EQ(attr2, results.back());
+}
+
+TEST(ATT_DatabaseTest, ReadByTypeSpanningMultipleGroupingsNarrowerRange) {
+  auto db = Database::Create(kTestRangeStart, kTestRangeEnd);
+  std::list<const Attribute*> results;
+
+  // Empty grouping
+  db->NewGrouping(kTestType1, 0, kTestValue1)->set_active(true);
+
+  // Grouping containing the first result
+  auto* grp = db->NewGrouping(kTestType1, 1, kTestValue1);
+  auto* attr1 =
+      grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements());
+  attr1->SetValue(kTestValue1);
+  grp->set_active(true);
+
+  // Empty grouping
+  db->NewGrouping(kTestType1, 0, kTestValue1)->set_active(true);
+
+  // Grouping containing the second result
+  grp = db->NewGrouping(kTestType1, 1, kTestValue1);
+  auto* attr2 =
+      grp->AddAttribute(kTestType2, AllowedNoSecurity(), AccessRequirements());
+  attr2->SetValue(kTestValue1);
+  grp->set_active(true);
+
+  // Empty grouping
+  db->NewGrouping(kTestType1, 0, kTestValue1)->set_active(true);
+
+  EXPECT_EQ(ErrorCode::kNoError,
+            db->ReadByType(attr1->handle(), attr2->handle() - 1, kTestType2,
+                           kDefaultMTU, &results));
+  ASSERT_EQ(1u, results.size());
+  EXPECT_EQ(attr1, results.front());
 }
 
 }  // namespace

@@ -76,7 +76,7 @@ class Database final : public fxl::RefCountedThreadSafe<Database> {
   // If |out_results| contains a single attribute and the value is larger than
   // kMaxReadByGroupTypeValueLength, then the response PDU should contain a
   // partial value. Otherwise, it can be assumed that all attribute values will
-  // fit within a with the given |max_payload_size|.
+  // fit within a packet with the given |max_payload_size|.
   //
   // The results are returned in ascending order of handle value.
   //
@@ -87,14 +87,37 @@ class Database final : public fxl::RefCountedThreadSafe<Database> {
                             uint16_t max_payload_size,
                             std::list<AttributeGrouping*>* out_results);
 
+  // Finds attributes within the range defined by |start_handle| and
+  // |end_handle| that match |type|. This method will include as many matching
+  // attributes as possible in accordance with the Read By Type Request
+  // specification (see Vol 3, Part F, 3.4.4.1).
+  //
+  // This method will return only one attribute with a dynamic value at a time.
+  // Multiple matching attributes with a static value (i.e. stored in the
+  // database) as long as their values have the same size and they can
+  // completely fit within a single ATT packet (given by |max_payload_size|). A
+  // result will never contain a static and a dynamic value at the same time.
+  //
+  // If |out_results| contains a single attribute and the value is larger than
+  // kMaxReadByTypeValueLength, then the response PDU should contain a partial
+  // value. Otherwise, it can be assumed that all attribute values will fit
+  // within a packet with the given |max_payload_size|.
+  //
+  // The results are returned in ascending order of handle value.
+  //
+  // The returned error code can be used in an Error Response PDU.
+  ErrorCode ReadByType(Handle start_handle,
+                       Handle end_handle,
+                       const common::UUID& type,
+                       uint16_t max_payload_size,
+                       std::list<const Attribute*>* out_results);
+
   const std::list<AttributeGrouping>& groupings() const { return groupings_; }
 
   // TODO(armansito): Add lookup functions:
   //   * FindAttribute(Handle);
-  //   * ReadByType
   //   * FindByTypeValue
   //   * FindInformation
-  //   * etc
 
  private:
   FRIEND_REF_COUNTED_THREAD_SAFE(Database);
