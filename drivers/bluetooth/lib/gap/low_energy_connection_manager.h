@@ -138,6 +138,10 @@ class LowEnergyConnectionManager final {
   ListenerId AddListener(const ConnectionCallback& callback);
   void RemoveListener(ListenerId id);
 
+  gatt::LocalServiceManager* gatt_registry() const {
+    return gatt_registry_.get();
+  }
+
   // TODO(armansito): Add a RemoteDeviceCache::Observer interface and move these
   // callbacks there.
 
