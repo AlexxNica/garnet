@@ -48,6 +48,8 @@ class Server final {
                          const att::PacketReader& packet);
   void OnReadByType(att::Bearer::TransactionId tid,
                     const att::PacketReader& packet);
+  void OnWriteRequest(att::Bearer::TransactionId tid,
+                      const att::PacketReader& packet);
 
   fxl::RefPtr<att::Database> db_;
   fxl::RefPtr<att::Bearer> att_;
@@ -57,6 +59,7 @@ class Server final {
   att::Bearer::HandlerId find_information_id_;
   att::Bearer::HandlerId read_by_group_type_id_;
   att::Bearer::HandlerId read_by_type_id_;
+  att::Bearer::HandlerId write_req_id_;
 
   fxl::WeakPtrFactory<Server> weak_ptr_factory_;
 
