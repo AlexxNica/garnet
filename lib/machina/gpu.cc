@@ -4,84 +4,18 @@
 
 #include "garnet/lib/machina/gpu.h"
 
-#include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 
 #include <fbl/intrusive_hash_table.h>
 #include <fbl/unique_ptr.h>
 #include <virtio/virtio_ids.h>
-#include <zircon/device/display.h>
-#include <zircon/process.h>
 
+#include "garnet/lib/machina/gpu_bitmap.h"
 #include "garnet/lib/machina/gpu_resource.h"
 #include "garnet/lib/machina/gpu_scanout.h"
-#include "third_party/skia/include/core/SkCanvas.h"
 
-// A scanout that renders to a zircon framebuffer device.
-class FramebufferScanout : public GpuScanout {
- public:
-  // Create a scanout that owns a zircon framebuffer device.
-  static zx_status_t Create(const char* path,
-                            fbl::unique_ptr<GpuScanout>* out) {
-    // Open framebuffer and get display info.
-    int vfd = open(path, O_RDWR);
-    if (vfd < 0)
-      return ZX_ERR_NOT_FOUND;
-
-    ioctl_display_get_fb_t fb;
-    if (ioctl_display_get_fb(vfd, &fb) != sizeof(fb)) {
-      close(vfd);
-      return ZX_ERR_NOT_FOUND;
-    }
-
-    // Map framebuffer VMO.
-    uintptr_t fbo;
-    size_t size = fb.info.stride * fb.info.pixelsize * fb.info.height;
-    zx_status_t status =
-        zx_vmar_map(zx_vmar_root_self(), 0, fb.vmo, 0, size,
-                    ZX_VM_FLAG_PERM_READ | ZX_VM_FLAG_PERM_WRITE, &fbo);
-    if (status != ZX_OK) {
-      close(vfd);
-      return status;
-    }
-
-    // Wrap the framebuffer in an SkSurface so we can render using a canvas.
-    SkImageInfo info =
-        SkImageInfo::MakeN32Premul(fb.info.width, fb.info.height);
-    size_t rowBytes = info.minRowBytes();
-    sk_sp<SkSurface> surface = SkSurface::MakeRasterDirect(
-        info, reinterpret_cast<void*>(fbo), rowBytes);
-
-    auto scanout =
-        fbl::make_unique<FramebufferScanout>(fbl::move(surface), vfd);
-    *out = fbl::move(scanout);
-    return ZX_OK;
-  }
-
-  FramebufferScanout(sk_sp<SkSurface>&& surface, int fd)
-      : GpuScanout(fbl::move(surface)), fd_(fd) {}
-
-  ~FramebufferScanout() {
-    if (fd_ > 0)
-      close(fd_);
-  }
-
-  void FlushRegion(const virtio_gpu_rect_t& rect) override {
-    GpuScanout::FlushRegion(rect);
-    ioctl_display_region_t fb_region = {
-        .x = rect.x,
-        .y = rect.y,
-        .width = rect.width,
-        .height = rect.height,
-    };
-    ioctl_display_flush_fb_region(fd_, &fb_region);
-  }
-
- private:
-  int fd_;
-};
+namespace machina {
 
 VirtioGpu::VirtioGpu(uintptr_t guest_physmem_addr, size_t guest_physmem_size)
     : VirtioDevice(VIRTIO_ID_GPU,
@@ -94,18 +28,9 @@ VirtioGpu::VirtioGpu(uintptr_t guest_physmem_addr, size_t guest_physmem_size)
 
 VirtioGpu::~VirtioGpu() = default;
 
-zx_status_t VirtioGpu::Init(const char* path) {
-  fbl::unique_ptr<GpuScanout> gpu_scanout;
-  zx_status_t status = FramebufferScanout::Create(path, &gpu_scanout);
-  if (status != ZX_OK)
-    return status;
-
-  status = AddScanout(fbl::move(gpu_scanout));
-  if (status != ZX_OK)
-    return status;
-
-  status = virtio_queue_poll(&queues_[VIRTIO_GPU_Q_CONTROLQ],
-                             &VirtioGpu::QueueHandler, this);
+zx_status_t VirtioGpu::Init() {
+  zx_status_t status = virtio_queue_poll(&queues_[VIRTIO_GPU_Q_CONTROLQ],
+                                         &VirtioGpu::QueueHandler, this);
   if (status != ZX_OK)
     return status;
 
@@ -250,15 +175,15 @@ zx_status_t VirtioGpu::HandleGpuCommand(virtio_queue_t* queue,
     case VIRTIO_GPU_CMD_UPDATE_CURSOR:
     case VIRTIO_GPU_CMD_MOVE_CURSOR:
     default: {
-        fprintf(stderr, "Unsupported GPU command %d\n", header->type);
-        // ACK.
-        virtio_desc_t response_desc;
-        virtio_queue_read_desc(queue, request_desc.next, &response_desc);
-        auto response =
-            reinterpret_cast<virtio_gpu_ctrl_hdr_t*>(response_desc.addr);
-        response->type = VIRTIO_GPU_RESP_ERR_UNSPEC;
-        *used += sizeof(*response);
-        return ZX_OK;
+      fprintf(stderr, "Unsupported GPU command %d\n", header->type);
+      // ACK.
+      virtio_desc_t response_desc;
+      virtio_queue_read_desc(queue, request_desc.next, &response_desc);
+      auto response =
+          reinterpret_cast<virtio_gpu_ctrl_hdr_t*>(response_desc.addr);
+      response->type = VIRTIO_GPU_RESP_ERR_UNSPEC;
+      *used += sizeof(*response);
+      return ZX_OK;
     }
   }
 }
@@ -366,3 +291,5 @@ void VirtioGpu::ResourceFlush(const virtio_gpu_resource_flush_t* request,
   }
   response->type = it->Flush(request);
 }
+
+}  // namespace machina

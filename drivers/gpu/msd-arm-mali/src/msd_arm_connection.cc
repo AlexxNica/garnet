@@ -46,10 +46,10 @@ void msd_connection_present_buffer(msd_connection_t* abi_connection, msd_buffer_
 void MsdArmConnection::ExecuteAtom(volatile magma_arm_mali_atom* atom)
 {
     uint8_t atom_number = atom->atom_number;
-    uint32_t slot = atom->core_requirements & kAtomCoreRequirementFragmentShader ? 0 : 1;
-    if (slot == 0 && (atom->core_requirements &
-                      (kAtomCoreRequirementComputeShader | kAtomCoreRequirementTiler))) {
-        magma::log(magma::LOG_WARNING, "Invalid core requirements 0x%x\n", atom->core_requirements);
+    uint32_t flags = atom->flags;
+    uint32_t slot = flags & kAtomFlagRequireFragmentShader ? 0 : 1;
+    if (slot == 0 && (flags & (kAtomFlagRequireComputeShader | kAtomFlagRequireTiler))) {
+        magma::log(magma::LOG_WARNING, "Invalid atom flags 0x%x\n", flags);
         return;
     }
     magma_arm_mali_user_data user_data;
@@ -129,15 +129,22 @@ magma_status_t msd_connection_wait_rendering(msd_connection_t* abi_connection, m
 
 std::shared_ptr<MsdArmConnection> MsdArmConnection::Create(msd_client_id_t client_id, Owner* owner)
 {
-    auto address_space = AddressSpace::Create();
-    if (!address_space)
-        return DRETP(nullptr, "Couldn't create address space");
-    return std::make_shared<MsdArmConnection>(client_id, std::move(address_space), owner);
+    auto connection = std::shared_ptr<MsdArmConnection>(new MsdArmConnection(client_id, owner));
+    if (!connection->Init())
+        return DRETP(nullptr, "Couldn't create connection");
+    return connection;
 }
 
-MsdArmConnection::MsdArmConnection(msd_client_id_t client_id,
-                                   std::unique_ptr<AddressSpace> address_space, Owner* owner)
-    : client_id_(client_id), address_space_(std::move(address_space)), owner_(owner)
+bool MsdArmConnection::Init()
+{
+    address_space_ = AddressSpace::Create(this);
+    if (!address_space_)
+        return DRETF(false, "Couldn't create address space");
+    return true;
+}
+
+MsdArmConnection::MsdArmConnection(msd_client_id_t client_id, Owner* owner)
+    : client_id_(client_id), owner_(owner)
 {
 }
 

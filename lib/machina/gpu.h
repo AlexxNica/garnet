@@ -17,6 +17,8 @@
 #define VIRTIO_GPU_Q_CURSORQ 1
 #define VIRTIO_GPU_Q_COUNT 2
 
+namespace machina {
+
 class GpuResource;
 class GpuScanout;
 class VirtioGpu;
@@ -35,9 +37,8 @@ class VirtioGpu : public VirtioDevice {
   virtio_queue_t& control_queue() { return queues_[VIRTIO_GPU_Q_CONTROLQ]; }
   virtio_queue_t& cursor_queue() { return queues_[VIRTIO_GPU_Q_CURSORQ]; }
 
-  // Opens the framebuffer device located at |path| and starts processing
-  // any descriptors that become available in the queues.
-  zx_status_t Init(const char* path);
+  // Begins processing any descriptors that become available in the queues.
+  zx_status_t Init();
 
   // Adds a scanout to the GPU.
   //
@@ -107,5 +108,7 @@ class VirtioGpu : public VirtioDevice {
   virtio_queue_t queues_[VIRTIO_GPU_Q_COUNT];
   virtio_gpu_config_t config_ = {};
 };
+
+}  // namespace machina
 
 #endif  // GARNET_LIB_MACHINA_GPU_H_

@@ -24,14 +24,9 @@ constexpr OpCode kTestResponse3 = kFindByTypeValueResponse;
 
 constexpr OpCode kTestCommand = kWriteCommand;
 
-void NopCallback(const PacketReader& packet) {}
+void NopCallback(const PacketReader&) {}
 void NopErrorCallback(bool, ErrorCode, Handle) {}
-
-template <typename... T>
-std::unique_ptr<common::MutableByteBuffer> NewBuffer(T... bytes) {
-  return std::make_unique<common::StaticByteBuffer<sizeof...(T)>>(
-      std::forward<T>(bytes)...);
-}
+void NopHandler(Bearer::TransactionId, const PacketReader&) {}
 
 class ATT_BearerTest : public l2cap::testing::FakeChannelTest {
  public:
@@ -87,8 +82,8 @@ TEST_F(ATT_BearerTest, StartTransactionErrorClosed) {
   bearer()->ShutDown();
   ASSERT_FALSE(bearer()->is_open());
 
-  EXPECT_FALSE(bearer()->StartTransaction(NewBuffer(kTestRequest), NopCallback,
-                                          NopErrorCallback));
+  EXPECT_FALSE(bearer()->StartTransaction(common::NewBuffer(kTestRequest),
+                                          NopCallback, NopErrorCallback));
 }
 
 TEST_F(ATT_BearerTest, StartTransactionInvalidPacket) {
@@ -98,18 +93,18 @@ TEST_F(ATT_BearerTest, StartTransactionInvalidPacket) {
 
   // Exceeds MTU.
   bearer()->set_mtu(1);
-  EXPECT_FALSE(bearer()->StartTransaction(NewBuffer(kTestRequest, 2),
+  EXPECT_FALSE(bearer()->StartTransaction(common::NewBuffer(kTestRequest, 2),
                                           NopCallback, NopErrorCallback));
 }
 
 TEST_F(ATT_BearerTest, StartTransactionWrongMethodType) {
   // Command
-  EXPECT_FALSE(bearer()->StartTransaction(NewBuffer(kWriteCommand), NopCallback,
-                                          NopErrorCallback));
+  EXPECT_FALSE(bearer()->StartTransaction(common::NewBuffer(kWriteCommand),
+                                          NopCallback, NopErrorCallback));
 
   // Notification
-  EXPECT_FALSE(bearer()->StartTransaction(NewBuffer(kNotification), NopCallback,
-                                          NopErrorCallback));
+  EXPECT_FALSE(bearer()->StartTransaction(common::NewBuffer(kNotification),
+                                          NopCallback, NopErrorCallback));
 }
 
 TEST_F(ATT_BearerTest, RequestTimeout) {
@@ -136,8 +131,8 @@ TEST_F(ATT_BearerTest, RequestTimeout) {
     QuitMessageLoopIf(cond);
   };
 
-  EXPECT_TRUE(
-      bearer()->StartTransaction(NewBuffer(kTestRequest), NopCallback, err_cb));
+  EXPECT_TRUE(bearer()->StartTransaction(common::NewBuffer(kTestRequest),
+                                         NopCallback, err_cb));
 
   RunMessageLoop();
   EXPECT_TRUE(closed);
@@ -179,9 +174,11 @@ TEST_F(ATT_BearerTest, RequestTimeoutMany) {
   };
 
   EXPECT_TRUE(bearer()->StartTransaction(
-      NewBuffer(kTestRequest, 'T', 'e', 's', 't'), NopCallback, err_cb));
+      common::NewBuffer(kTestRequest, 'T', 'e', 's', 't'), NopCallback,
+      err_cb));
   EXPECT_TRUE(bearer()->StartTransaction(
-      NewBuffer(kTestRequest2, 'T', 'e', 's', 't'), NopCallback, err_cb));
+      common::NewBuffer(kTestRequest2, 'T', 'e', 's', 't'), NopCallback,
+      err_cb));
 
   RunMessageLoop();
 
@@ -215,7 +212,7 @@ TEST_F(ATT_BearerTest, IndicationTimeout) {
   };
 
   EXPECT_TRUE(bearer()->StartTransaction(
-      NewBuffer(kIndication, 'T', 'e', 's', 't'), NopCallback, err_cb));
+      common::NewBuffer(kIndication, 'T', 'e', 's', 't'), NopCallback, err_cb));
 
   RunMessageLoop();
   EXPECT_TRUE(closed);
@@ -259,10 +256,10 @@ TEST_F(ATT_BearerTest, IndicationTimeoutMany) {
     QuitMessageLoopIf(cond);
   };
 
-  EXPECT_TRUE(bearer()->StartTransaction(NewBuffer(kIndication, kIndValue1),
-                                         NopCallback, err_cb));
-  EXPECT_TRUE(bearer()->StartTransaction(NewBuffer(kIndication, kIndValue2),
-                                         NopCallback, err_cb));
+  EXPECT_TRUE(bearer()->StartTransaction(
+      common::NewBuffer(kIndication, kIndValue1), NopCallback, err_cb));
+  EXPECT_TRUE(bearer()->StartTransaction(
+      common::NewBuffer(kIndication, kIndValue2), NopCallback, err_cb));
 
   RunMessageLoop();
 
@@ -340,7 +337,8 @@ TEST_F(ATT_BearerTest, SendRequestWrongResponse) {
     err_cb_called = true;
     QuitMessageLoopIf(cond);
   };
-  bearer()->StartTransaction(NewBuffer(kTestRequest), NopCallback, err_cb);
+  bearer()->StartTransaction(common::NewBuffer(kTestRequest), NopCallback,
+                             err_cb);
 
   RunMessageLoop();
   EXPECT_TRUE(closed);
@@ -385,7 +383,8 @@ TEST_F(ATT_BearerTest, SendRequestErrorResponseTooShort) {
     err_cb_called = true;
     QuitMessageLoopIf(cond);
   };
-  bearer()->StartTransaction(NewBuffer(kTestRequest), NopCallback, err_cb);
+  bearer()->StartTransaction(common::NewBuffer(kTestRequest), NopCallback,
+                             err_cb);
 
   RunMessageLoop();
   EXPECT_TRUE(closed);
@@ -430,7 +429,8 @@ TEST_F(ATT_BearerTest, SendRequestErrorResponseTooLong) {
     err_cb_called = true;
     QuitMessageLoopIf(cond);
   };
-  bearer()->StartTransaction(NewBuffer(kTestRequest), NopCallback, err_cb);
+  bearer()->StartTransaction(common::NewBuffer(kTestRequest), NopCallback,
+                             err_cb);
 
   RunMessageLoop();
   EXPECT_TRUE(closed);
@@ -480,7 +480,8 @@ TEST_F(ATT_BearerTest, SendRequestErrorResponseWrongOpCode) {
     err_cb_called = true;
     QuitMessageLoopIf(cond);
   };
-  bearer()->StartTransaction(NewBuffer(kTestRequest), NopCallback, err_cb);
+  bearer()->StartTransaction(common::NewBuffer(kTestRequest), NopCallback,
+                             err_cb);
 
   RunMessageLoop();
   EXPECT_TRUE(closed);
@@ -521,7 +522,8 @@ TEST_F(ATT_BearerTest, SendRequestErrorResponse) {
     err_cb_called = true;
     fsl::MessageLoop::GetCurrent()->QuitNow();
   };
-  bearer()->StartTransaction(NewBuffer(kTestRequest), NopCallback, err_cb);
+  bearer()->StartTransaction(common::NewBuffer(kTestRequest), NopCallback,
+                             err_cb);
 
   RunMessageLoop();
   EXPECT_TRUE(err_cb_called);
@@ -553,7 +555,8 @@ TEST_F(ATT_BearerTest, SendRequestSuccess) {
     EXPECT_TRUE(common::ContainersEqual(response, rsp_packet.data()));
     fsl::MessageLoop::GetCurrent()->QuitNow();
   };
-  bearer()->StartTransaction(NewBuffer(kTestRequest), cb, NopErrorCallback);
+  bearer()->StartTransaction(common::NewBuffer(kTestRequest), cb,
+                             NopErrorCallback);
 
   RunMessageLoop();
   EXPECT_TRUE(chan_cb_called);
@@ -613,12 +616,14 @@ TEST_F(ATT_BearerTest, SendManyRequests) {
     EXPECT_TRUE(common::ContainersEqual(response1, rsp_packet.data()));
     success_count++;
   };
-  bearer()->StartTransaction(NewBuffer(kTestRequest), callback1, error_cb);
+  bearer()->StartTransaction(common::NewBuffer(kTestRequest), callback1,
+                             error_cb);
 
   auto callback2 = [](const auto& rsp_packet) {
     ADD_FAILURE() << "Transaction should have ended in error!";
   };
-  bearer()->StartTransaction(NewBuffer(kTestRequest2), callback2, error_cb);
+  bearer()->StartTransaction(common::NewBuffer(kTestRequest2), callback2,
+                             error_cb);
 
   auto callback3 = [&success_count, &response3](const auto& rsp_packet) {
     EXPECT_EQ(1u, success_count);
@@ -626,7 +631,8 @@ TEST_F(ATT_BearerTest, SendManyRequests) {
     success_count++;
     fsl::MessageLoop::GetCurrent()->QuitNow();
   };
-  bearer()->StartTransaction(NewBuffer(kTestRequest3), callback3, error_cb);
+  bearer()->StartTransaction(common::NewBuffer(kTestRequest3), callback3,
+                             error_cb);
 
   RunMessageLoop();
 
@@ -665,7 +671,8 @@ TEST_F(ATT_BearerTest, SendIndicationSuccess) {
     EXPECT_TRUE(common::ContainersEqual(conf, packet.data()));
     fsl::MessageLoop::GetCurrent()->QuitNow();
   };
-  bearer()->StartTransaction(NewBuffer(kIndication), cb, NopErrorCallback);
+  bearer()->StartTransaction(common::NewBuffer(kIndication), cb,
+                             NopErrorCallback);
 
   RunMessageLoop();
   EXPECT_TRUE(chan_cb_called);
@@ -679,7 +686,7 @@ TEST_F(ATT_BearerTest, SendWithoutResponseErrorClosed) {
   bearer()->ShutDown();
   ASSERT_FALSE(bearer()->is_open());
 
-  EXPECT_FALSE(bearer()->SendWithoutResponse(NewBuffer(kTestCommand)));
+  EXPECT_FALSE(bearer()->SendWithoutResponse(common::NewBuffer(kTestCommand)));
 }
 
 TEST_F(ATT_BearerTest, SendWithoutResponseInvalidPacket) {
@@ -689,24 +696,25 @@ TEST_F(ATT_BearerTest, SendWithoutResponseInvalidPacket) {
 
   // Exceeds MTU
   bearer()->set_mtu(1);
-  EXPECT_FALSE(bearer()->SendWithoutResponse(NewBuffer(kTestCommand, 2)));
+  EXPECT_FALSE(
+      bearer()->SendWithoutResponse(common::NewBuffer(kTestCommand, 2)));
 }
 
 TEST_F(ATT_BearerTest, SendWithoutResponseWrongMethodType) {
-  EXPECT_FALSE(bearer()->SendWithoutResponse(NewBuffer(kTestRequest)));
-  EXPECT_FALSE(bearer()->SendWithoutResponse(NewBuffer(kTestResponse)));
-  EXPECT_FALSE(bearer()->SendWithoutResponse(NewBuffer(kIndication)));
+  EXPECT_FALSE(bearer()->SendWithoutResponse(common::NewBuffer(kTestRequest)));
+  EXPECT_FALSE(bearer()->SendWithoutResponse(common::NewBuffer(kTestResponse)));
+  EXPECT_FALSE(bearer()->SendWithoutResponse(common::NewBuffer(kIndication)));
 }
 
 TEST_F(ATT_BearerTest, SendWithoutResponseCorrectMethodType) {
-  EXPECT_TRUE(bearer()->SendWithoutResponse(NewBuffer(kNotification)));
-  EXPECT_TRUE(bearer()->SendWithoutResponse(NewBuffer(kTestCommand)));
-  EXPECT_TRUE(
-      bearer()->SendWithoutResponse(NewBuffer(kTestRequest | kCommandFlag)));
+  EXPECT_TRUE(bearer()->SendWithoutResponse(common::NewBuffer(kNotification)));
+  EXPECT_TRUE(bearer()->SendWithoutResponse(common::NewBuffer(kTestCommand)));
+  EXPECT_TRUE(bearer()->SendWithoutResponse(
+      common::NewBuffer(kTestRequest | kCommandFlag)));
 
   // Any opcode is accepted as long as it has the command flag set.
-  EXPECT_TRUE(
-      bearer()->SendWithoutResponse(NewBuffer(kInvalidOpCode | kCommandFlag)));
+  EXPECT_TRUE(bearer()->SendWithoutResponse(
+      common::NewBuffer(kInvalidOpCode | kCommandFlag)));
 }
 
 TEST_F(ATT_BearerTest, SendWithoutResponseMany) {
@@ -726,12 +734,407 @@ TEST_F(ATT_BearerTest, SendWithoutResponseMany) {
 
   for (OpCode opcode = 0; opcode < kExpectedCount; opcode++) {
     // Everything
-    EXPECT_TRUE(
-        bearer()->SendWithoutResponse(NewBuffer(opcode | kCommandFlag)));
+    EXPECT_TRUE(bearer()->SendWithoutResponse(
+        common::NewBuffer(opcode | kCommandFlag)));
   }
 
   RunMessageLoop();
   EXPECT_EQ(kExpectedCount, chan_cb_count);
+}
+
+TEST_F(ATT_BearerTest, RegisterHandlerErrorClosed) {
+  bearer()->ShutDown();
+  EXPECT_FALSE(bearer()->is_open());
+  EXPECT_EQ(Bearer::kInvalidHandlerId,
+            bearer()->RegisterHandler(kWriteRequest, NopHandler));
+  EXPECT_EQ(Bearer::kInvalidHandlerId,
+            bearer()->RegisterHandler(kIndication, NopHandler));
+}
+
+TEST_F(ATT_BearerTest, RegisterHandlerErrorAlreadyRegistered) {
+  EXPECT_NE(Bearer::kInvalidHandlerId,
+            bearer()->RegisterHandler(kIndication, NopHandler));
+  EXPECT_EQ(Bearer::kInvalidHandlerId,
+            bearer()->RegisterHandler(kIndication, NopHandler));
+}
+
+TEST_F(ATT_BearerTest, UnregisterHandler) {
+  auto id0 = bearer()->RegisterHandler(kNotification, NopHandler);
+  EXPECT_NE(Bearer::kInvalidHandlerId, id0);
+
+  bearer()->UnregisterHandler(id0);
+
+  // It should be possible to register new handlers for the same opcodes.
+  id0 = bearer()->RegisterHandler(kNotification, NopHandler);
+  EXPECT_NE(Bearer::kInvalidHandlerId, id0);
+}
+
+TEST_F(ATT_BearerTest, RemoteTransactionNoHandler) {
+  auto error_rsp = common::CreateStaticByteBuffer(
+      // opcode
+      kErrorResponse,
+
+      // request opcode
+      kTestRequest,
+
+      // handle
+      0x00, 0x00,
+
+      // error code
+      ErrorCode::kRequestNotSupported);
+
+  bool received_error_rsp = false;
+  auto chan_cb = [&received_error_rsp, &error_rsp](auto packet) {
+    received_error_rsp = true;
+    EXPECT_TRUE(common::ContainersEqual(error_rsp, *packet));
+    fsl::MessageLoop::GetCurrent()->QuitNow();
+  };
+  fake_chan()->SetSendCallback(chan_cb, message_loop()->task_runner());
+  fake_chan()->Receive(common::CreateStaticByteBuffer(kTestRequest));
+
+  RunMessageLoop();
+  EXPECT_TRUE(received_error_rsp);
+}
+
+TEST_F(ATT_BearerTest, RemoteTransactionSeqProtocolError) {
+  int request_count = 0;
+  auto handler = [&request_count](auto id, const PacketReader& packet) {
+    EXPECT_EQ(kTestRequest, packet.opcode());
+    EXPECT_EQ(0u, packet.payload_size());
+
+    request_count++;
+    fsl::MessageLoop::GetCurrent()->QuitNow();
+  };
+
+  bearer()->RegisterHandler(kTestRequest, handler);
+  fake_chan()->Receive(common::CreateStaticByteBuffer(kTestRequest));
+
+  RunMessageLoop();
+  ASSERT_EQ(1, request_count);
+
+  // Receiving a second request before sending a response should close the
+  // bearer.
+  bool closed = false;
+  bearer()->set_closed_callback([&closed] {
+    closed = true;
+    fsl::MessageLoop::GetCurrent()->QuitNow();
+  });
+
+  fake_chan()->Receive(common::CreateStaticByteBuffer(kTestRequest));
+
+  RunMessageLoop();
+  EXPECT_TRUE(closed);
+  EXPECT_EQ(1, request_count);
+  EXPECT_FALSE(bearer()->is_open());
+}
+
+TEST_F(ATT_BearerTest, RemoteIndicationSeqProtocolError) {
+  int ind_count = 0;
+  auto handler = [&ind_count](auto id, const PacketReader& packet) {
+    EXPECT_EQ(kIndication, packet.opcode());
+    EXPECT_EQ(0u, packet.payload_size());
+
+    ind_count++;
+    fsl::MessageLoop::GetCurrent()->QuitNow();
+  };
+
+  bearer()->RegisterHandler(kIndication, handler);
+  fake_chan()->Receive(common::CreateStaticByteBuffer(kIndication));
+
+  RunMessageLoop();
+  ASSERT_EQ(1, ind_count);
+
+  // Receiving a second indication before sending a confirmation should close
+  // the bearer.
+  bool closed = false;
+  bearer()->set_closed_callback([&closed] {
+    closed = true;
+    fsl::MessageLoop::GetCurrent()->QuitNow();
+  });
+
+  fake_chan()->Receive(common::CreateStaticByteBuffer(kIndication));
+
+  RunMessageLoop();
+  EXPECT_TRUE(closed);
+  EXPECT_EQ(1, ind_count);
+  EXPECT_FALSE(bearer()->is_open());
+}
+
+TEST_F(ATT_BearerTest, ReplyInvalidPacket) {
+  // Empty
+  EXPECT_FALSE(bearer()->Reply(0, std::make_unique<common::BufferView>()));
+
+  // Exceeds MTU.
+  bearer()->set_mtu(1);
+  EXPECT_FALSE(bearer()->Reply(0, common::NewBuffer(kTestRequest, 2)));
+}
+
+TEST_F(ATT_BearerTest, ReplyInvalidId) {
+  EXPECT_FALSE(bearer()->Reply(Bearer::kInvalidTransactionId,
+                               common::NewBuffer(kTestResponse)));
+
+  // The ID is valid but doesn't correspond to an active transaction.
+  EXPECT_FALSE(bearer()->Reply(1u, common::NewBuffer(kTestResponse)));
+}
+
+TEST_F(ATT_BearerTest, ReplyWrongOpCode) {
+  Bearer::TransactionId id;
+  bool handler_called = false;
+  auto handler = [&id, &handler_called](auto cb_id,
+                                        const PacketReader& packet) {
+    EXPECT_EQ(kTestRequest, packet.opcode());
+    EXPECT_EQ(0u, packet.payload_size());
+
+    handler_called = true;
+    id = cb_id;
+    fsl::MessageLoop::GetCurrent()->QuitNow();
+  };
+
+  bearer()->RegisterHandler(kTestRequest, handler);
+  fake_chan()->Receive(common::CreateStaticByteBuffer(kTestRequest));
+
+  RunMessageLoop();
+  ASSERT_TRUE(handler_called);
+
+  EXPECT_FALSE(bearer()->Reply(id, common::NewBuffer(kTestResponse2)));
+}
+
+TEST_F(ATT_BearerTest, ReplyToIndicationWrongOpCode) {
+  Bearer::TransactionId id;
+  bool handler_called = false;
+  auto handler = [&id, &handler_called](auto cb_id,
+                                        const PacketReader& packet) {
+    EXPECT_EQ(kIndication, packet.opcode());
+    EXPECT_EQ(0u, packet.payload_size());
+
+    handler_called = true;
+    id = cb_id;
+    fsl::MessageLoop::GetCurrent()->QuitNow();
+  };
+
+  bearer()->RegisterHandler(kIndication, handler);
+  fake_chan()->Receive(common::CreateStaticByteBuffer(kIndication));
+
+  RunMessageLoop();
+  ASSERT_TRUE(handler_called);
+
+  EXPECT_FALSE(bearer()->Reply(id, common::NewBuffer(kTestResponse)));
+}
+
+TEST_F(ATT_BearerTest, ReplyWithResponse) {
+  bool response_sent = false;
+  auto chan_cb = [&response_sent](auto packet) {
+    response_sent = true;
+
+    EXPECT_EQ(kTestResponse, (*packet)[0]);
+    fsl::MessageLoop::GetCurrent()->QuitNow();
+  };
+  fake_chan()->SetSendCallback(chan_cb, message_loop()->task_runner());
+
+  Bearer::TransactionId id;
+  bool handler_called = false;
+  auto handler = [&id, &handler_called](auto cb_id,
+                                        const PacketReader& packet) {
+    EXPECT_EQ(kTestRequest, packet.opcode());
+    EXPECT_EQ(0u, packet.payload_size());
+
+    handler_called = true;
+    id = cb_id;
+    fsl::MessageLoop::GetCurrent()->QuitNow();
+  };
+
+  bearer()->RegisterHandler(kTestRequest, handler);
+  fake_chan()->Receive(common::CreateStaticByteBuffer(kTestRequest));
+
+  RunMessageLoop();
+  ASSERT_TRUE(handler_called);
+
+  EXPECT_TRUE(bearer()->Reply(id, common::NewBuffer(kTestResponse)));
+
+  // The transaction is marked as complete.
+  EXPECT_FALSE(bearer()->Reply(id, common::NewBuffer(kTestResponse)));
+  EXPECT_FALSE(bearer()->ReplyWithError(id, 0, ErrorCode::kUnlikelyError));
+
+  RunMessageLoop();
+  EXPECT_TRUE(response_sent);
+}
+
+TEST_F(ATT_BearerTest, IndicationConfirmation) {
+  bool conf_sent = false;
+  auto chan_cb = [&conf_sent](auto packet) {
+    conf_sent = true;
+    EXPECT_EQ(kConfirmation, (*packet)[0]);
+    fsl::MessageLoop::GetCurrent()->QuitNow();
+  };
+  fake_chan()->SetSendCallback(chan_cb, message_loop()->task_runner());
+
+  Bearer::TransactionId id;
+  bool handler_called = false;
+  auto handler = [&id, &handler_called](auto cb_id,
+                                        const PacketReader& packet) {
+    EXPECT_EQ(kIndication, packet.opcode());
+    EXPECT_EQ(0u, packet.payload_size());
+
+    handler_called = true;
+    id = cb_id;
+    fsl::MessageLoop::GetCurrent()->QuitNow();
+  };
+
+  bearer()->RegisterHandler(kIndication, handler);
+  fake_chan()->Receive(common::CreateStaticByteBuffer(kIndication));
+
+  RunMessageLoop();
+  ASSERT_TRUE(handler_called);
+
+  EXPECT_TRUE(bearer()->Reply(id, common::NewBuffer(kConfirmation)));
+
+  // The transaction is marked as complete.
+  EXPECT_FALSE(bearer()->Reply(id, common::NewBuffer(kConfirmation)));
+
+  RunMessageLoop();
+  EXPECT_TRUE(conf_sent);
+}
+
+TEST_F(ATT_BearerTest, ReplyWithErrorInvalidId) {
+  EXPECT_FALSE(bearer()->ReplyWithError(0, 0, ErrorCode::kNoError));
+}
+
+TEST_F(ATT_BearerTest, IndicationReplyWithError) {
+  Bearer::TransactionId id;
+  bool handler_called = false;
+  auto handler = [&id, &handler_called](auto cb_id,
+                                        const PacketReader& packet) {
+    EXPECT_EQ(kIndication, packet.opcode());
+    EXPECT_EQ(0u, packet.payload_size());
+
+    handler_called = true;
+    id = cb_id;
+    fsl::MessageLoop::GetCurrent()->QuitNow();
+  };
+
+  bearer()->RegisterHandler(kIndication, handler);
+  fake_chan()->Receive(common::CreateStaticByteBuffer(kIndication));
+
+  RunMessageLoop();
+  ASSERT_TRUE(handler_called);
+
+  // Cannot reply to an indication with error.
+  EXPECT_FALSE(bearer()->ReplyWithError(id, 0, ErrorCode::kUnlikelyError));
+}
+
+TEST_F(ATT_BearerTest, ReplyWithError) {
+  bool response_sent = false;
+  auto chan_cb = [&response_sent](auto packet) {
+    response_sent = true;
+
+    // The error response that we send below
+    auto expected = common::CreateStaticByteBuffer(
+        kErrorResponse, kTestRequest, 0x00, 0x00, ErrorCode::kUnlikelyError);
+    EXPECT_TRUE(common::ContainersEqual(expected, *packet));
+    fsl::MessageLoop::GetCurrent()->QuitNow();
+  };
+  fake_chan()->SetSendCallback(chan_cb, message_loop()->task_runner());
+
+  Bearer::TransactionId id;
+  bool handler_called = false;
+  auto handler = [&id, &handler_called](auto cb_id,
+                                        const PacketReader& packet) {
+    EXPECT_EQ(kTestRequest, packet.opcode());
+    EXPECT_EQ(0u, packet.payload_size());
+
+    handler_called = true;
+    id = cb_id;
+    fsl::MessageLoop::GetCurrent()->QuitNow();
+  };
+
+  bearer()->RegisterHandler(kTestRequest, handler);
+  fake_chan()->Receive(common::CreateStaticByteBuffer(kTestRequest));
+
+  RunMessageLoop();
+  ASSERT_TRUE(handler_called);
+
+  EXPECT_TRUE(bearer()->ReplyWithError(id, 0, ErrorCode::kUnlikelyError));
+
+  // The transaction is marked as complete.
+  EXPECT_FALSE(bearer()->Reply(id, common::NewBuffer(kTestResponse)));
+  EXPECT_FALSE(bearer()->ReplyWithError(id, 0, ErrorCode::kUnlikelyError));
+
+  RunMessageLoop();
+  EXPECT_TRUE(response_sent);
+}
+
+// Requests and indications have independent flow control
+TEST_F(ATT_BearerTest, RequestAndIndication) {
+  Bearer::TransactionId req_id, ind_id;
+
+  int req_count = 0;
+  int ind_count = 0;
+  auto cond = [&req_count, &ind_count] {
+    return req_count == 1 && ind_count == 1;
+  };
+  auto req_handler = [&req_id, &req_count, cond, this](auto id,
+                                                       const auto& packet) {
+    EXPECT_EQ(kTestRequest, packet.opcode());
+    EXPECT_EQ(0u, packet.payload_size());
+
+    req_count++;
+    req_id = id;
+    QuitMessageLoopIf(cond);
+  };
+  auto ind_handler = [&ind_id, &ind_count, cond, this](auto id,
+                                                       const auto& packet) {
+    EXPECT_EQ(kIndication, packet.opcode());
+    EXPECT_EQ(0u, packet.payload_size());
+
+    ind_count++;
+    ind_id = id;
+    QuitMessageLoopIf(cond);
+  };
+
+  bearer()->RegisterHandler(kTestRequest, req_handler);
+  bearer()->RegisterHandler(kIndication, ind_handler);
+
+  fake_chan()->Receive(common::CreateStaticByteBuffer(kTestRequest));
+  fake_chan()->Receive(common::CreateStaticByteBuffer(kIndication));
+
+  RunMessageLoop();
+  EXPECT_EQ(1, req_count);
+  ASSERT_EQ(1, ind_count);
+
+  // Opcodes for the wrong transaction should be rejected.
+  EXPECT_FALSE(bearer()->Reply(ind_id, common::NewBuffer(kTestResponse)));
+  EXPECT_FALSE(bearer()->Reply(req_id, common::NewBuffer(kConfirmation)));
+
+  // It should be possible to end two distinct transactions.
+  EXPECT_TRUE(bearer()->Reply(req_id, common::NewBuffer(kTestResponse)));
+  EXPECT_TRUE(bearer()->Reply(ind_id, common::NewBuffer(kConfirmation)));
+}
+
+// Test receipt of non-transactional PDUs.
+TEST_F(ATT_BearerTest, RemotePDUWithoutResponse) {
+  int cmd_count = 0;
+  auto cmd_handler = [&cmd_count](auto tid, const auto& packet) {
+    EXPECT_EQ(Bearer::kInvalidTransactionId, tid);
+    EXPECT_EQ(kWriteCommand, packet.opcode());
+    cmd_count++;
+  };
+  bearer()->RegisterHandler(kWriteCommand, cmd_handler);
+
+  int not_count = 0;
+  auto not_handler = [&not_count](auto tid, const auto& packet) {
+    EXPECT_EQ(Bearer::kInvalidTransactionId, tid);
+    EXPECT_EQ(kNotification, packet.opcode());
+    not_count++;
+    fsl::MessageLoop::GetCurrent()->QuitNow();
+  };
+  bearer()->RegisterHandler(kNotification, not_handler);
+
+  fake_chan()->Receive(common::CreateStaticByteBuffer(kTestCommand));
+  fake_chan()->Receive(common::CreateStaticByteBuffer(kNotification));
+
+  RunMessageLoop();
+  EXPECT_EQ(1, cmd_count);
+  EXPECT_EQ(1, not_count);
 }
 
 }  // namespace

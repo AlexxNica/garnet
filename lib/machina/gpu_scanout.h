@@ -8,19 +8,21 @@
 #include <virtio/gpu.h>
 #include <zircon/types.h>
 
-#include "third_party/skia/include/core/SkSurface.h"
+#include "garnet/lib/machina/gpu_bitmap.h"
+
+namespace machina {
 
 class GpuResource;
 
 // A scanout represents a display that GPU resources can be rendered to.
 class GpuScanout {
  public:
-  GpuScanout(sk_sp<SkSurface>&& surface) : surface_(surface) {}
+  GpuScanout(GpuBitmap surface) : surface_(fbl::move(surface)) {}
 
   virtual ~GpuScanout() = default;
 
-  uint32_t width() const { return surface_->width(); }
-  uint32_t height() const { return surface_->height(); }
+  uint32_t width() const { return surface_.width(); }
+  uint32_t height() const { return surface_.height(); }
 
   virtual void FlushRegion(const virtio_gpu_rect_t& rect);
 
@@ -28,11 +30,13 @@ class GpuScanout {
                           const virtio_gpu_set_scanout_t* request);
 
  private:
-  sk_sp<SkSurface> surface_;
+  GpuBitmap surface_;
 
   // Scanout parameters.
   GpuResource* resource_;
-  SkRect rect_;
+  GpuRect rect_;
 };
+
+}  // namespace machina
 
 #endif  // GARNET_LIB_MACHINA_GPU_SCANOUT_H_

@@ -15,6 +15,11 @@
 
 namespace bluetooth {
 namespace att {
+
+// static
+constexpr Bearer::HandlerId Bearer::kInvalidHandlerId;
+constexpr Bearer::TransactionId Bearer::kInvalidTransactionId;
+
 namespace {
 
 MethodType GetMethodType(OpCode opcode) {
@@ -114,11 +119,10 @@ OpCode MatchingTransactionCode(OpCode transaction_end_code) {
 
 }  // namespace
 
-Bearer::PendingTransaction::PendingTransaction(
-    OpCode opcode,
-    TransactionCallback callback,
-    ErrorCallback error_callback,
-    std::unique_ptr<common::ByteBuffer> pdu)
+Bearer::PendingTransaction::PendingTransaction(OpCode opcode,
+                                               TransactionCallback callback,
+                                               ErrorCallback error_callback,
+                                               common::ByteBufferPtr pdu)
     : opcode(opcode),
       callback(callback),
       error_callback(error_callback),
@@ -127,6 +131,10 @@ Bearer::PendingTransaction::PendingTransaction(
   FXL_DCHECK(this->error_callback);
   FXL_DCHECK(this->pdu);
 }
+
+Bearer::PendingRemoteTransaction::PendingRemoteTransaction(TransactionId id,
+                                                           OpCode opcode)
+    : id(id), opcode(opcode) {}
 
 Bearer::TransactionQueue::~TransactionQueue() {
   if (timeout_task_)
@@ -210,7 +218,10 @@ void Bearer::TransactionQueue::InvokeErrorAll(bool timeout,
 
 Bearer::Bearer(std::unique_ptr<l2cap::Channel> chan,
                uint32_t transaction_timeout_ms)
-    : chan_(std::move(chan)), transaction_timeout_ms_(transaction_timeout_ms) {
+    : chan_(std::move(chan)),
+      transaction_timeout_ms_(transaction_timeout_ms),
+      next_remote_transaction_id_(1u),
+      next_handler_id_(1u) {
   FXL_DCHECK(chan_);
 
   if (chan_->link_type() == hci::Connection::LinkType::kLE) {
@@ -262,7 +273,7 @@ void Bearer::ShutDownInternal(bool due_to_timeout) {
     closed_cb_();
 }
 
-bool Bearer::StartTransaction(std::unique_ptr<common::ByteBuffer> pdu,
+bool Bearer::StartTransaction(common::ByteBufferPtr pdu,
                               const TransactionCallback& callback,
                               const ErrorCallback& error_callback) {
   FXL_DCHECK(pdu);
@@ -272,12 +283,12 @@ bool Bearer::StartTransaction(std::unique_ptr<common::ByteBuffer> pdu,
   return SendInternal(std::move(pdu), callback, error_callback);
 }
 
-bool Bearer::SendWithoutResponse(std::unique_ptr<common::ByteBuffer> pdu) {
+bool Bearer::SendWithoutResponse(common::ByteBufferPtr pdu) {
   FXL_DCHECK(pdu);
   return SendInternal(std::move(pdu), {}, {});
 }
 
-bool Bearer::SendInternal(std::unique_ptr<common::ByteBuffer> pdu,
+bool Bearer::SendInternal(common::ByteBufferPtr pdu,
                           const TransactionCallback& callback,
                           const ErrorCallback& error_callback) {
   if (!is_open()) {
@@ -326,6 +337,106 @@ bool Bearer::SendInternal(std::unique_ptr<common::ByteBuffer> pdu,
   tq->Enqueue(std::make_unique<PendingTransaction>(
       reader.opcode(), callback, error_callback, std::move(pdu)));
   TryStartNextTransaction(tq);
+
+  return true;
+}
+
+Bearer::HandlerId Bearer::RegisterHandler(OpCode opcode,
+                                          const Handler& handler) {
+  FXL_DCHECK(handler);
+
+  if (!is_open())
+    return kInvalidHandlerId;
+
+  if (handlers_.find(opcode) != handlers_.end()) {
+    FXL_VLOG(1) << fxl::StringPrintf(
+        "att: Can only register one Handler per opcode (0x%02x)", opcode);
+    return kInvalidHandlerId;
+  }
+
+  HandlerId id = NextHandlerId();
+  if (id == kInvalidHandlerId)
+    return kInvalidHandlerId;
+
+  auto res = handler_id_map_.emplace(id, opcode);
+  FXL_CHECK(res.second) << "att: Handler ID got reused (id: " << id << ")";
+
+  handlers_[opcode] = handler;
+
+  return id;
+}
+
+void Bearer::UnregisterHandler(HandlerId id) {
+  FXL_DCHECK(id != kInvalidHandlerId);
+
+  auto iter = handler_id_map_.find(id);
+  if (iter == handler_id_map_.end()) {
+    FXL_VLOG(1) << "att: Cannot unregister unknown handler id: " << id;
+    return;
+  }
+
+  OpCode opcode = iter->second;
+  handlers_.erase(opcode);
+}
+
+bool Bearer::Reply(TransactionId tid, common::ByteBufferPtr pdu) {
+  FXL_DCHECK(thread_checker_.IsCreationThreadCurrent());
+  FXL_DCHECK(pdu);
+
+  if (tid == kInvalidTransactionId)
+    return false;
+
+  if (!is_open()) {
+    FXL_VLOG(2) << "att: Bearer closed";
+    return false;
+  }
+
+  if (!IsPacketValid(*pdu)) {
+    FXL_VLOG(1) << "att: Invalid response PDU";
+    return false;
+  }
+
+  RemoteTransaction* pending = FindRemoteTransaction(tid);
+  if (!pending)
+    return false;
+
+  PacketReader reader(pdu.get());
+
+  // Use ReplyWithError() instead.
+  if (reader.opcode() == kErrorResponse)
+    return false;
+
+  OpCode pending_opcode = (*pending)->opcode;
+  if (pending_opcode != MatchingTransactionCode(reader.opcode())) {
+    FXL_VLOG(1) << fxl::StringPrintf(
+        "att: opcode does not match pending (pending: 0x%02x, given: 0x%02x)",
+        pending_opcode, reader.opcode());
+    return false;
+  }
+
+  pending->Reset();
+  chan_->Send(std::move(pdu));
+
+  return true;
+}
+
+bool Bearer::ReplyWithError(TransactionId id,
+                            Handle handle,
+                            ErrorCode error_code) {
+  FXL_DCHECK(thread_checker_.IsCreationThreadCurrent());
+
+  RemoteTransaction* pending = FindRemoteTransaction(id);
+  if (!pending)
+    return false;
+
+  OpCode pending_opcode = (*pending)->opcode;
+  if (pending_opcode == kIndication) {
+    FXL_VLOG(1) << "att: Cannot respond to an indication with error!";
+    return false;
+  }
+
+  pending->Reset();
+  SendErrorResponse(pending_opcode, handle, error_code);
 
   return true;
 }
@@ -421,6 +532,81 @@ void Bearer::HandleEndTransaction(TransactionQueue* tq,
     transaction->error_callback(false /* timeout */, error_code, attr_in_error);
 }
 
+Bearer::HandlerId Bearer::NextHandlerId() {
+  auto id = next_handler_id_;
+
+  // This will stop incrementing if this were overflows and always return
+  // kInvalidHandlerId.
+  if (next_handler_id_ != kInvalidHandlerId)
+    next_handler_id_++;
+  return id;
+}
+
+Bearer::TransactionId Bearer::NextRemoteTransactionId() {
+  auto id = next_remote_transaction_id_;
+
+  next_remote_transaction_id_++;
+
+  // Increment extra in the case of overflow.
+  if (next_remote_transaction_id_ == kInvalidTransactionId)
+    next_remote_transaction_id_++;
+
+  return id;
+}
+
+void Bearer::HandleBeginTransaction(RemoteTransaction* currently_pending,
+                                    const PacketReader& packet) {
+  FXL_DCHECK(thread_checker_.IsCreationThreadCurrent());
+  FXL_DCHECK(currently_pending);
+
+  if (currently_pending->HasValue()) {
+    FXL_VLOG(1) << fxl::StringPrintf(
+        "att: A transaction is already pending! (opcode: 0x%02x)",
+        packet.opcode());
+    ShutDown();
+    return;
+  }
+
+  auto iter = handlers_.find(packet.opcode());
+  if (iter == handlers_.end()) {
+    FXL_VLOG(1) << fxl::StringPrintf(
+        "att: No handler registered for opcode 0x%02x", packet.opcode());
+    SendErrorResponse(packet.opcode(), 0, ErrorCode::kRequestNotSupported);
+    return;
+  }
+
+  auto id = NextRemoteTransactionId();
+  *currently_pending = PendingRemoteTransaction(id, packet.opcode());
+
+  iter->second(id, packet);
+}
+
+Bearer::RemoteTransaction* Bearer::FindRemoteTransaction(TransactionId id) {
+  if (remote_request_ && remote_request_->id == id) {
+    return &remote_request_;
+  }
+
+  if (remote_indication_ && remote_indication_->id == id) {
+    return &remote_indication_;
+  }
+
+  FXL_VLOG(1) << "att: id " << id << " does not match any transaction";
+  return nullptr;
+}
+
+void Bearer::HandlePDUWithoutResponse(const PacketReader& packet) {
+  FXL_DCHECK(thread_checker_.IsCreationThreadCurrent());
+
+  auto iter = handlers_.find(packet.opcode());
+  if (iter == handlers_.end()) {
+    FXL_VLOG(1) << fxl::StringPrintf(
+        "att: Dropping unhandled packet (opcode: 0x%02x)", packet.opcode());
+    return;
+  }
+
+  iter->second(kInvalidTransactionId, packet);
+}
+
 void Bearer::OnChannelClosed() {
   FXL_DCHECK(thread_checker_.IsCreationThreadCurrent());
   ShutDown();
@@ -462,9 +648,17 @@ void Bearer::OnRxBFrame(const l2cap::SDU& sdu) {
       case MethodType::kConfirmation:
         HandleEndTransaction(&indication_queue_, packet);
         break;
+      case MethodType::kRequest:
+        HandleBeginTransaction(&remote_request_, packet);
+        break;
+      case MethodType::kIndication:
+        HandleBeginTransaction(&remote_indication_, packet);
+        break;
+      case MethodType::kNotification:
+      case MethodType::kCommand:
+        HandlePDUWithoutResponse(packet);
+        break;
       default:
-        // TODO(armansito): For now we respond with an error to all
-        // notifications and indications as well.
         FXL_VLOG(2) << fxl::StringPrintf("att: Unsupported opcode: 0x%02x",
                                          packet.opcode());
         SendErrorResponse(packet.opcode(), 0, ErrorCode::kRequestNotSupported);
