@@ -1,6 +1,7 @@
 [workspace]
 members =  [
   "bin/device_settings",
+  "examples/fidl/*_rust",
   "examples/network/wget-rs",
   "public/rust/crates/fdio",
   "public/rust/crates/fuchsia-vfs",
@@ -8,14 +9,17 @@ members =  [
   "public/rust/crates/fuchsia-zircon/fuchsia-zircon-sys",
   "public/rust/crates/mxruntime",
   "public/rust/crates/mxruntime/mxruntime-sys",
+  "public/rust/fidl_crates/garnet_examples_fidl_services",
 ]
 
 [patch.crates-io]
 fdio = { path = "public/rust/crates/fdio" }
+fidl = { path = "public/lib/fidl/rust/fidl" }
 fuchsia-zircon = { path = "public/rust/crates/fuchsia-zircon" }
 fuchsia-zircon-sys = { path = "public/rust/crates/fuchsia-zircon/fuchsia-zircon-sys" }
+garnet_examples_fidl_services = { path = "public/rust/fidl_crates/garnet_examples_fidl_services" }
+mio = { path = "../third_party/rust-mirrors/mio" }
 mxruntime = { path = "public/rust/crates/mxruntime" }
 mxruntime-sys = { path = "public/rust/crates/mxruntime/mxruntime-sys" }
-mio = { path = "../third_party/rust-mirrors/mio" }
 rand = { path = "../third_party/rust-mirrors/rand" }
 tokio-core = { path = "../third_party/rust-mirrors/tokio-core" }

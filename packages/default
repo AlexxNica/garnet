@@ -13,6 +13,7 @@
         "garnet/packages/drivers",
         "garnet/packages/escher",
         "garnet/packages/fidl",
+        "garnet/packages/fidl_examples",
         "garnet/packages/fidl_tests",
         "garnet/packages/fonts",
         "garnet/packages/fortune",
