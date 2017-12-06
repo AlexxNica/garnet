@@ -44,6 +44,8 @@ static const uint64_t kUartBases[kNumUarts] = {
 #include "garnet/lib/machina/arch/x86/io_port.h"
 #include "garnet/lib/machina/arch/x86/tpm.h"
 
+static const char kDsdtPath[] = "/system/data/dsdt.aml";
+static const char kMcfgPath[] = "/system/data/mcfg.aml";
 static const size_t kNumUarts = 4;
 static const uint64_t kUartBases[kNumUarts] = {
     machina::kI8250Base0,
@@ -221,7 +223,14 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Failed to create page table\n");
     return status;
   }
-  status = guest_create_acpi_table(physmem_addr, physmem_size, pt_end_off);
+
+  struct acpi_config acpi_config = {
+    .dsdt_path = kDsdtPath,
+    .mcfg_path = kMcfgPath,
+    .io_apic_addr = machina::kIoApicPhysBase,
+    .num_cpus = 1,
+  };
+  status = create_acpi_table(acpi_config, physmem_addr, physmem_size, pt_end_off);
   if (status != ZX_OK) {
     fprintf(stderr, "Failed to create ACPI table\n");
     return status;
@@ -245,13 +254,13 @@ int main(int argc, char** argv) {
   }
 
   uintptr_t guest_ip;
-  uintptr_t bootdata_off = 0;
+  uintptr_t ramdisk_off = 0;
 
   char guest_cmdline[PATH_MAX];
   const char* zircon_fmt_string = "TERM=uart %s";
   snprintf(guest_cmdline, PATH_MAX, zircon_fmt_string, cmdline ? cmdline : "");
   status = setup_zircon(physmem_addr, physmem_size, first_page, pt_end_off, fd,
-                        ramdisk_path, guest_cmdline, &guest_ip, &bootdata_off);
+                        ramdisk_path, guest_cmdline, &guest_ip, &ramdisk_off);
 
   if (status == ZX_ERR_NOT_SUPPORTED) {
     const char* linux_fmt_string =
@@ -260,7 +269,7 @@ int main(int argc, char** argv) {
     snprintf(guest_cmdline, PATH_MAX, linux_fmt_string, pt_end_off,
              cmdline ? cmdline : "");
     status = setup_linux(physmem_addr, physmem_size, first_page, fd,
-                         ramdisk_path, guest_cmdline, &guest_ip, &bootdata_off);
+                         ramdisk_path, guest_cmdline, &guest_ip, &ramdisk_off);
   }
   if (status == ZX_ERR_NOT_SUPPORTED) {
     fprintf(stderr, "Unknown kernel\n");
@@ -415,9 +424,9 @@ int main(int argc, char** argv) {
   // Setup initial VCPU state.
   zx_vcpu_state_t vcpu_state = {};
 #if __aarch64__
-  vcpu_state.x[0] = bootdata_off;
+  vcpu_state.x[0] = ramdisk_off;
 #elif __x86_64__
-  vcpu_state.rsi = bootdata_off;
+  vcpu_state.rsi = ramdisk_off;
 #endif
   status = vcpu.WriteState(ZX_VCPU_STATE, &vcpu_state, sizeof(vcpu_state));
   if (status != ZX_OK) {

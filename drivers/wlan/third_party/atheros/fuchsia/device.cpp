@@ -70,17 +70,15 @@ void Device::DdkRelease() {
     delete this;
 }
 
-zx_status_t Device::WlanmacQuery(uint32_t options, ethmac_info_t* info) {
-    info->mtu = 1500;
-    std::memcpy(info->mac, mac_addr_, ETH_MAC_SIZE);
-    info->features |= ETHMAC_FEATURE_WLAN;
-    return ZX_OK;
-}
-
-zx_status_t Device::WlanmacQuery2(uint32_t options, wlanmac_info_t* info) {
+zx_status_t Device::WlanmacQuery(uint32_t options, wlanmac_info_t* info) {
     memset(info, 0, sizeof(*info));
+
+    info->eth_info.mtu = 1500;
+    std::memcpy(info->eth_info.mac, mac_addr_, ETH_MAC_SIZE);
+    info->eth_info.features |= ETHMAC_FEATURE_WLAN;
+
     // TODO(tkilbourn): fill out the rest of the wlan features as this driver is implemented
-    return WlanmacQuery(options, &info->eth_info);
+    return ZX_OK;
 }
 
 zx_status_t Device::WlanmacStart(fbl::unique_ptr<ddk::WlanmacIfcProxy> proxy) {
