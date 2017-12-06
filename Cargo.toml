@@ -3,6 +3,7 @@ members =  [
   "bin/device_settings",
   "examples/fidl/*_rust",
   "examples/network/wget-rs",
+  "public/lib/fidl/rust/fidl",
   "public/rust/crates/fdio",
   "public/rust/crates/fuchsia-vfs",
   "public/rust/crates/fuchsia-zircon",
