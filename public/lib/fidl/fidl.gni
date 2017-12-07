@@ -334,7 +334,7 @@ template("fidl") {
     rust_crate_target_name = "${target_name}_rust"
 
     action(rust_crate_target_name) {
-      script = "//garnet/public/lib/fidl/build/make_crate.py"
+      script = "//garnet/public/lib/fidl/build/make_rust_library.py"
 
       deps = []
       dep_inputs = []

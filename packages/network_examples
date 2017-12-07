@@ -1,7 +1,6 @@
 {
     "languages": [
-        "cpp",
-        "rust"
+        "cpp"
     ],
     "imports": [
         "garnet/packages/network"

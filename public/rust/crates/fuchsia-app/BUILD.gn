@@ -7,8 +7,7 @@ import("//build/package.gni")
 
 rust_library("fuchsia-app") {
   deps = [
-    "//garnet/public/lib/app/fidl:fidl_rust_library",
-    "//garnet/public/lib/app/fidl:service_provider_rust_library",
+    "//garnet/public/lib/app/fidl",
     "//garnet/public/lib/fidl/rust/fidl",
     "//garnet/public/rust/crates/fdio",
     "//garnet/public/rust/crates/fuchsia-zircon",
