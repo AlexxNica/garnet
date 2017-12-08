@@ -1,5 +1,5 @@
 [package]
-name = "garnet_examples_fidl_services"
+name = "garnet_public_lib_app_fidl"
 version = "0.1.0"
 license = "BSD-3-Clause"
 authors = ["Rob Tsuk <robtsuk@google.com>"]
@@ -10,5 +10,7 @@ repository = "https://fuchsia.googlesource.com/garnet/"
 fidl = "0.1.0"
 fuchsia-zircon = "0.3.2"
 futures = "0.1.15"
+garnet_public_lib_app_fidl_service_provider = "0.1.0"
+garnet_public_lib_fsl_fidl = "0.1.0"
 tokio-core = "0.1"
 tokio-fuchsia = "0.1.0"
