@@ -15,6 +15,3 @@ fdio = "0.2.0"
 
 [dev-dependencies]
 tempdir = "0.3"
-
-[profile.release]
-panic = 'abort'

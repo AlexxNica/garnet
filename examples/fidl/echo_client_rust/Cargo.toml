@@ -15,7 +15,3 @@ fuchsia-app = "0.1.0"
 futures = "0.1.15"
 garnet_examples_fidl_services = "0.1.0"
 tokio-core = "0.1"
-
-[profile.release]
-lto = true
-panic = 'abort'
