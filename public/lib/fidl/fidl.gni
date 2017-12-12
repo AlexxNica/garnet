@@ -328,7 +328,13 @@ template("fidl") {
   }
 
   if (generate_fidl_for_rust) {
+    target_dir = get_label_info(target_name, "dir")
     rust_crate_target_name = "${target_name}_rust"
+    path_based_name =
+        exec_script("//garnet/public/lib/fidl/build/label_to_crate.py",
+                    [ target_dir ],
+                    "trim string")
+    generated_file = "${generator_rust_crate_output}/${path_based_name}.rs"
 
     action(rust_crate_target_name) {
       script = "//garnet/public/lib/fidl/build/make_rust_library.py"
@@ -354,8 +360,7 @@ template("fidl") {
 
       output_base = generator_rust_crate_output
       outputs = [
-        "$output_base/Cargo.toml",
-        "$output_base/src/lib.rs",
+        generated_file,
       ]
 
       rebase_gen_dir = rebase_path(root_gen_dir)
@@ -375,7 +380,6 @@ template("fidl") {
         args += [ "--inputs=$rebase_inputs" ]
       }
     }
-
 
     # Creates a map from fidl file to GN build target which supplies it. Used primarily
     # for resolving dependencies in the Rust binding generation.
