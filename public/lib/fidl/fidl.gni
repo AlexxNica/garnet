@@ -46,7 +46,6 @@ if (generate_fidl_for_dart) {
 #
 #   visibility (optional)
 template("fidl") {
-  print("======== fidl $target_name", generate_fidl_for_rust)
   assert(
       defined(invoker.sources) || defined(invoker.deps) ||
           defined(invoker.public_deps),
@@ -330,7 +329,6 @@ template("fidl") {
 
   if (generate_fidl_for_rust) {
     rust_crate_target_name = "${target_name}_rust"
-    print("======== fidl $target_name", rust_crate_target_name)
 
     action(rust_crate_target_name) {
       script = "//garnet/public/lib/fidl/build/make_rust_library.py"

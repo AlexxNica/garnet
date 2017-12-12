@@ -1,6 +1,5 @@
 {
     "imports": [
-        "garnet/packages/vulkan",
-        "garnet/packages/wlan"
+        "garnet/packages/vulkan"
     ]
 }
