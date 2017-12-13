@@ -334,7 +334,7 @@ template("fidl") {
         exec_script("//garnet/public/lib/fidl/build/label_to_crate.py",
                     [ target_dir ],
                     "trim string")
-    generated_file = "${generator_rust_crate_output}/${path_based_name}.rs"
+    generated_file = "${target_gen_dir}/${path_based_name}.rs"
 
     action(rust_crate_target_name) {
       script = "//garnet/public/lib/fidl/build/make_rust_library.py"
