@@ -3,10 +3,9 @@
 # found in the LICENSE file.
 
 import("//build/rust/rust_library.gni")
-import("//build/package.gni")
 
-rust_library("fuchsia-app") {
+rust_library("garnet_public_lib_app_fidl_service_provider") {
   deps = [
-    "//garnet/public/lib/app/fidl:fidl_rust",
+    "//garnet/public/lib/app/fidl:service_provider_rust",
   ]
 }
