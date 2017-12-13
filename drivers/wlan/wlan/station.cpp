@@ -64,8 +64,8 @@ zx_status_t Station::HandleMlmeJoinReq(const JoinRequest& req) {
     auto req_clone = req.Clone();
     bss_ = std::move(req_clone->selected_bss);
     bssid_.Set(bss_->bssid.data());
-    debugjoin("setting channel to %u\n", bss_->channel);
-    zx_status_t status = device_->SetChannel(wlan_channel_t{.primary = bss_->channel});
+    debugjoin("setting channel to %u\n", bss_->chan->primary);
+    zx_status_t status = device_->SetChannel(wlan_channel_t{.primary = bss_->chan->primary});
     if (status != ZX_OK) {
         errorf("could not set wlan channel: %d\n", status);
         Reset();
@@ -689,7 +689,14 @@ zx_status_t Station::HandleEthFrame(const BaseFrame<EthernetII>& frame) {
     auto buffer = GetBuffer(wlan_len);
     if (buffer == nullptr) { return ZX_ERR_NO_RESOURCES; }
 
-    wlan_tx_info_t txinfo = {};
+    wlan_tx_info_t txinfo = {
+        // TODO(porce): Specify CBW together with corresponding valid_fields.
+        //.tx_flags = 0x0,
+        //.valid_fields = 0x0,
+        //.cbw = CBW20,
+        //.date_rate = 0x0,
+        //.mcs = 0x0,
+    };
     auto wlan_packet = fbl::unique_ptr<Packet>(new Packet(std::move(buffer), wlan_len));
     // no need to clear the whole packet; we memset the headers instead and copy over all bytes in
     // the payload

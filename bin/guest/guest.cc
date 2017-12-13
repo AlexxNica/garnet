@@ -19,6 +19,7 @@
 #include <zircon/syscalls.h>
 #include <zircon/syscalls/hypervisor.h>
 
+#include "garnet/bin/guest/guest_view.h"
 #include "garnet/bin/guest/linux.h"
 #include "garnet/bin/guest/zircon.h"
 #include "garnet/lib/machina/address.h"
@@ -85,7 +86,6 @@ static zx_status_t usage(const char* cmd) {
   fprintf(stderr, "\t-p [pages]         Number of unused pages to allow the guest to\n"
                   "\t                   retain. Has no effect unless -m is also used\n");
   fprintf(stderr, "\t-d                 Demand-page balloon deflate requests\n");
-  fprintf(stderr, "\t-g                 Enable graphics output to the framebuffer.\n");
   fprintf(stderr, "\n");
   // clang-format on
   return ZX_ERR_INVALID_ARGS;
@@ -170,11 +170,25 @@ static const char* linux_cmdline(const char* cmdline,
   snprintf(buf, sizeof(buf), fmt, uart_addr, cmdline);
 #elif __x86_64__
   auto fmt =
-      "earlycon=uart,io,%#lx console=ttyS0 io_delay=none clocksource=tsc "
+      "earlycon=uart,io,%#lx console=tty0 io_delay=none clocksource=tsc "
       "acpi_rsdp=%#lx %s";
   snprintf(buf, sizeof(buf), fmt, uart_addr, acpi_addr, cmdline);
 #endif
   return buf;
+}
+
+zx_status_t setup_zircon_framebuffer(
+    machina::VirtioGpu* gpu,
+    fbl::unique_ptr<machina::GpuScanout>* scanout) {
+  zx_status_t status = machina::FramebufferScanout::Create(
+      "/dev/class/framebuffer/000", scanout);
+  if (status != ZX_OK)
+    return status;
+  return gpu->AddScanout(scanout->get());
+}
+
+zx_status_t setup_scenic_framebuffer(machina::VirtioGpu* gpu) {
+  return GuestView::Start(gpu);
 }
 
 int main(int argc, char** argv) {
@@ -184,9 +198,8 @@ int main(int argc, char** argv) {
   const char* cmdline = "";
   zx_duration_t balloon_poll_interval = 0;
   bool balloon_deflate_on_demand = false;
-  bool use_gpu = false;
   int opt;
-  while ((opt = getopt(argc, argv, "b:r:c:m:dp:g")) != -1) {
+  while ((opt = getopt(argc, argv, "b:r:c:m:dp:")) != -1) {
     switch (opt) {
       case 'b':
         block_path = optarg;
@@ -221,15 +234,19 @@ int main(int argc, char** argv) {
           return ZX_ERR_INVALID_ARGS;
         }
         break;
-      case 'g':
-        use_gpu = true;
-        break;
       default:
         return usage(cmd);
     }
   }
-  if (optind >= argc)
-    return usage(cmd);
+  const char* kernel_path;
+  if (optind < argc) {
+    kernel_path = argv[optind];
+  } else {
+    // Default configuration.
+    // TODO(ZX-1487): Avoid hard-coding these.
+    ramdisk_path = "/system/data/bootdata.bin";
+    kernel_path = "/system/data/zircon.bin";
+  }
 
   Guest guest;
   zx_status_t status = guest.Init(kVmoSize);
@@ -262,7 +279,7 @@ int main(int argc, char** argv) {
 #endif  // __x86_64__
 
   // Open the kernel image.
-  fbl::unique_fd fd(open(argv[optind], O_RDONLY));
+  fbl::unique_fd fd(open(kernel_path, O_RDONLY));
   if (!fd) {
     fprintf(stderr, "Failed to open kernel image \"%s\"\n", argv[optind]);
     return ZX_ERR_IO;
@@ -315,7 +332,7 @@ int main(int argc, char** argv) {
 #endif  // __x86_64__
   };
   Vcpu vcpu;
-  status = vcpu.Init(guest, &args);
+  status = vcpu.Create(&guest, &args);
   if (status != ZX_OK) {
     fprintf(stderr, "Failed to create VCPU\n");
     return status;
@@ -411,32 +428,29 @@ int main(int argc, char** argv) {
   machina::VirtioGpu gpu(physmem_addr, physmem_size);
   machina::VirtioInput input(physmem_addr, physmem_size, "zircon-input",
                              "serial-number");
-  if (use_gpu) {
-    fbl::unique_ptr<machina::GpuScanout> gpu_scanout;
-    status = machina::FramebufferScanout::Create("/dev/class/framebuffer/000",
-                                                 &gpu_scanout);
-    if (status != ZX_OK)
-      return status;
-    status = gpu.AddScanout(fbl::move(gpu_scanout));
-    if (status != ZX_OK)
-      return status;
-
-    status = gpu.Init();
-    if (status != ZX_OK)
-      return status;
-
-    status = bus.Connect(&gpu.pci_device(), PCI_DEVICE_VIRTIO_GPU);
-    if (status != ZX_OK)
-      return status;
-
-    // Setup input device.
-    status = input.Start();
-    if (status != ZX_OK)
-      return status;
-    status = bus.Connect(&input.pci_device(), PCI_DEVICE_VIRTIO_INPUT);
+  fbl::unique_ptr<machina::GpuScanout> gpu_scanout;
+  status = setup_zircon_framebuffer(&gpu, &gpu_scanout);
+  if (status != ZX_OK) {
+    status = setup_scenic_framebuffer(&gpu);
     if (status != ZX_OK)
       return status;
   }
+
+  status = gpu.Init();
+  if (status != ZX_OK)
+    return status;
+
+  status = bus.Connect(&gpu.pci_device(), PCI_DEVICE_VIRTIO_GPU);
+  if (status != ZX_OK)
+    return status;
+
+  // Setup input device.
+  status = input.Start();
+  if (status != ZX_OK)
+    return status;
+  status = bus.Connect(&input.pci_device(), PCI_DEVICE_VIRTIO_INPUT);
+  if (status != ZX_OK)
+    return status;
 
   // Setup initial VCPU state.
   zx_vcpu_state_t vcpu_state = {};
@@ -445,12 +459,10 @@ int main(int argc, char** argv) {
 #elif __x86_64__
   vcpu_state.rsi = boot_ptr;
 #endif
-  status = vcpu.WriteState(ZX_VCPU_STATE, &vcpu_state, sizeof(vcpu_state));
-  if (status != ZX_OK) {
-    fprintf(stderr, "Failed to write VCPU state\n");
-    return status;
-  }
-
   // Begin VCPU execution.
-  return vcpu.Loop();
+  status = vcpu.Start(&vcpu_state);
+  if (status != ZX_OK)
+    return status;
+
+  return vcpu.Join();
 }
