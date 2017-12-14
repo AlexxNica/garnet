@@ -20,76 +20,74 @@
 
 #include "targaddrs.h"
 
-#define ATH10K_FW_DIR			"ath10k"
+#include <inttypes.h>
 
+#define ATHEROS_VID    (0x168c)
+
+/* 25 */
 #define QCA988X_2_0_DEVICE_ID   (0x003c)
 #define QCA6164_2_1_DEVICE_ID   (0x0041)
 #define QCA6174_2_1_DEVICE_ID   (0x003e)
 #define QCA99X0_2_0_DEVICE_ID   (0x0040)
-#define QCA9888_2_0_DEVICE_ID	(0x0056)
-#define QCA9984_1_0_DEVICE_ID	(0x0046)
+#define QCA9888_2_0_DEVICE_ID   (0x0056)
+#define QCA9984_1_0_DEVICE_ID   (0x0046)
 #define QCA9377_1_0_DEVICE_ID   (0x0042)
 #define QCA9887_1_0_DEVICE_ID   (0x0050)
 
+/* 34 */
 /* QCA988X 1.0 definitions (unsupported) */
-#define QCA988X_HW_1_0_CHIP_ID_REV	0x0
+#define QCA988X_HW_1_0_CHIP_ID_REV      0x0
 
 /* QCA988X 2.0 definitions */
-#define QCA988X_HW_2_0_VERSION		0x4100016c
-#define QCA988X_HW_2_0_CHIP_ID_REV	0x2
-#define QCA988X_HW_2_0_FW_DIR		ATH10K_FW_DIR "/QCA988X/hw2.0"
-#define QCA988X_HW_2_0_BOARD_DATA_FILE	"board.bin"
-#define QCA988X_HW_2_0_PATCH_LOAD_ADDR	0x1234
+#define QCA988X_HW_2_0_VERSION          0x4100016c
+#define QCA988X_HW_2_0_CHIP_ID_REV      0x2
+#define QCA988X_HW_2_0_FW_DIR           ATH10K_FW_DIR "/QCA988X/hw2.0"
+#define QCA988X_HW_2_0_BOARD_DATA_FILE  "board.bin"
+#define QCA988X_HW_2_0_PATCH_LOAD_ADDR  0x1234
 
 /* QCA9887 1.0 definitions */
-#define QCA9887_HW_1_0_VERSION		0x4100016d
-#define QCA9887_HW_1_0_CHIP_ID_REV	0
-#define QCA9887_HW_1_0_FW_DIR		ATH10K_FW_DIR "/QCA9887/hw1.0"
-#define QCA9887_HW_1_0_BOARD_DATA_FILE	"board.bin"
-#define QCA9887_HW_1_0_PATCH_LOAD_ADDR	0x1234
+#define QCA9887_HW_1_0_VERSION          0x4100016d
+#define QCA9887_HW_1_0_CHIP_ID_REV      0
+#define QCA9887_HW_1_0_FW_DIR           ATH10K_FW_DIR "/QCA9887/hw1.0"
+#define QCA9887_HW_1_0_BOARD_DATA_FILE  "board.bin"
+#define QCA9887_HW_1_0_PATCH_LOAD_ADDR  0x1234
 
 /* QCA6174 target BMI version signatures */
-#define QCA6174_HW_1_0_VERSION		0x05000000
-#define QCA6174_HW_1_1_VERSION		0x05000001
-#define QCA6174_HW_1_3_VERSION		0x05000003
-#define QCA6174_HW_2_1_VERSION		0x05010000
-#define QCA6174_HW_3_0_VERSION		0x05020000
-#define QCA6174_HW_3_2_VERSION		0x05030000
+#define QCA6174_HW_1_0_VERSION          0x05000000
+#define QCA6174_HW_1_1_VERSION          0x05000001
+#define QCA6174_HW_1_3_VERSION          0x05000003
+#define QCA6174_HW_2_1_VERSION          0x05010000
+#define QCA6174_HW_3_0_VERSION          0x05020000
+#define QCA6174_HW_3_2_VERSION          0x05030000
 
 /* QCA9377 target BMI version signatures */
-#define QCA9377_HW_1_0_DEV_VERSION	0x05020000
-#define QCA9377_HW_1_1_DEV_VERSION	0x05020001
+#define QCA9377_HW_1_0_DEV_VERSION      0x05020000
+#define QCA9377_HW_1_1_DEV_VERSION      0x05020001
 
 enum qca6174_pci_rev {
-	QCA6174_PCI_REV_1_1 = 0x11,
-	QCA6174_PCI_REV_1_3 = 0x13,
-	QCA6174_PCI_REV_2_0 = 0x20,
-	QCA6174_PCI_REV_3_0 = 0x30,
+        QCA6174_PCI_REV_1_1 = 0x11,
+        QCA6174_PCI_REV_1_3 = 0x13,
+        QCA6174_PCI_REV_2_0 = 0x20,
+        QCA6174_PCI_REV_3_0 = 0x30,
 };
 
+/* 70 */
 enum qca6174_chip_id_rev {
-	QCA6174_HW_1_0_CHIP_ID_REV = 0,
-	QCA6174_HW_1_1_CHIP_ID_REV = 1,
-	QCA6174_HW_1_3_CHIP_ID_REV = 2,
-	QCA6174_HW_2_1_CHIP_ID_REV = 4,
-	QCA6174_HW_2_2_CHIP_ID_REV = 5,
-	QCA6174_HW_3_0_CHIP_ID_REV = 8,
-	QCA6174_HW_3_1_CHIP_ID_REV = 9,
-	QCA6174_HW_3_2_CHIP_ID_REV = 10,
+        QCA6174_HW_1_0_CHIP_ID_REV = 0,
+        QCA6174_HW_1_1_CHIP_ID_REV = 1,
+        QCA6174_HW_1_3_CHIP_ID_REV = 2,
+        QCA6174_HW_2_1_CHIP_ID_REV = 4,
+        QCA6174_HW_2_2_CHIP_ID_REV = 5,
+        QCA6174_HW_3_0_CHIP_ID_REV = 8,
+        QCA6174_HW_3_1_CHIP_ID_REV = 9,
+        QCA6174_HW_3_2_CHIP_ID_REV = 10,
 };
 
+/* 82 */
 enum qca9377_chip_id_rev {
-	QCA9377_HW_1_0_CHIP_ID_REV = 0x0,
-	QCA9377_HW_1_1_CHIP_ID_REV = 0x1,
+        QCA9377_HW_1_0_CHIP_ID_REV = 0x0,
+        QCA9377_HW_1_1_CHIP_ID_REV = 0x1,
 };
-
-#define QCA6174_HW_2_1_FW_DIR		"ath10k/QCA6174/hw2.1"
-#define QCA6174_HW_2_1_BOARD_DATA_FILE	"board.bin"
-#define QCA6174_HW_2_1_PATCH_LOAD_ADDR	0x1234
-
-#define QCA6174_HW_3_0_FW_DIR		"ath10k/QCA6174/hw3.0"
-#define QCA6174_HW_3_0_BOARD_DATA_FILE	"board.bin"
-#define QCA6174_HW_3_0_PATCH_LOAD_ADDR	0x1234
 
 /* QCA99X0 1.0 definitions (unsupported) */
 #define QCA99X0_HW_1_0_CHIP_ID_REV     0x0
@@ -97,170 +95,61 @@ enum qca9377_chip_id_rev {
 /* QCA99X0 2.0 definitions */
 #define QCA99X0_HW_2_0_DEV_VERSION     0x01000000
 #define QCA99X0_HW_2_0_CHIP_ID_REV     0x1
-#define QCA99X0_HW_2_0_FW_DIR          ATH10K_FW_DIR "/QCA99X0/hw2.0"
-#define QCA99X0_HW_2_0_BOARD_DATA_FILE "board.bin"
-#define QCA99X0_HW_2_0_PATCH_LOAD_ADDR	0x1234
 
 /* QCA9984 1.0 defines */
-#define QCA9984_HW_1_0_DEV_VERSION	0x1000000
-#define QCA9984_HW_DEV_TYPE		0xa
-#define QCA9984_HW_1_0_CHIP_ID_REV	0x0
-#define QCA9984_HW_1_0_FW_DIR		ATH10K_FW_DIR "/QCA9984/hw1.0"
-#define QCA9984_HW_1_0_BOARD_DATA_FILE "board.bin"
-#define QCA9984_HW_1_0_PATCH_LOAD_ADDR	0x1234
+#define QCA9984_HW_1_0_DEV_VERSION      0x1000000
+#define QCA9984_HW_DEV_TYPE             0xa
+#define QCA9984_HW_1_0_CHIP_ID_REV      0x0
 
 /* QCA9888 2.0 defines */
-#define QCA9888_HW_2_0_DEV_VERSION	0x1000000
-#define QCA9888_HW_DEV_TYPE		0xc
-#define QCA9888_HW_2_0_CHIP_ID_REV	0x0
-#define QCA9888_HW_2_0_FW_DIR		ATH10K_FW_DIR "/QCA9888/hw2.0"
-#define QCA9888_HW_2_0_BOARD_DATA_FILE "board.bin"
-#define QCA9888_HW_2_0_PATCH_LOAD_ADDR	0x1234
+#define QCA9888_HW_2_0_DEV_VERSION      0x1000000
+#define QCA9888_HW_DEV_TYPE             0xc
+#define QCA9888_HW_2_0_CHIP_ID_REV      0x0
 
-/* QCA9377 1.0 definitions */
-#define QCA9377_HW_1_0_FW_DIR          ATH10K_FW_DIR "/QCA9377/hw1.0"
-#define QCA9377_HW_1_0_BOARD_DATA_FILE "board.bin"
-#define QCA9377_HW_1_0_PATCH_LOAD_ADDR	0x1234
-
-/* QCA4019 1.0 definitions */
-#define QCA4019_HW_1_0_DEV_VERSION     0x01000000
-#define QCA4019_HW_1_0_FW_DIR          ATH10K_FW_DIR "/QCA4019/hw1.0"
-#define QCA4019_HW_1_0_BOARD_DATA_FILE "board.bin"
-#define QCA4019_HW_1_0_PATCH_LOAD_ADDR  0x1234
-
-#define ATH10K_FW_FILE_BASE		"firmware"
-#define ATH10K_FW_API_MAX		6
-#define ATH10K_FW_API_MIN		2
-
-#define ATH10K_FW_API2_FILE		"firmware-2.bin"
-#define ATH10K_FW_API3_FILE		"firmware-3.bin"
-
-/* added support for ATH10K_FW_IE_WMI_OP_VERSION */
-#define ATH10K_FW_API4_FILE		"firmware-4.bin"
-
-/* HTT id conflict fix for management frames over HTT */
-#define ATH10K_FW_API5_FILE		"firmware-5.bin"
-
-/* the firmware-6.bin blob */
-#define ATH10K_FW_API6_FILE		"firmware-6.bin"
-
-#define ATH10K_FW_UTF_FILE		"utf.bin"
-#define ATH10K_FW_UTF_API2_FILE		"utf-2.bin"
-
-/* includes also the null byte */
-#define ATH10K_FIRMWARE_MAGIC               "QCA-ATH10K"
-#define ATH10K_BOARD_MAGIC                  "QCA-ATH10K-BOARD"
-
-#define ATH10K_BOARD_API2_FILE         "board-2.bin"
-
+/* 156 */
 #define REG_DUMP_COUNT_QCA988X 60
 
-struct ath10k_fw_ie {
-	__le32 id;
-	__le32 len;
-	u8 data[0];
-};
-
-enum ath10k_fw_ie_type {
-	ATH10K_FW_IE_FW_VERSION = 0,
-	ATH10K_FW_IE_TIMESTAMP = 1,
-	ATH10K_FW_IE_FEATURES = 2,
-	ATH10K_FW_IE_FW_IMAGE = 3,
-	ATH10K_FW_IE_OTP_IMAGE = 4,
-
-	/* WMI "operations" interface version, 32 bit value. Supported from
-	 * FW API 4 and above.
-	 */
-	ATH10K_FW_IE_WMI_OP_VERSION = 5,
-
-	/* HTT "operations" interface version, 32 bit value. Supported from
-	 * FW API 5 and above.
-	 */
-	ATH10K_FW_IE_HTT_OP_VERSION = 6,
-
-	/* Code swap image for firmware binary */
-	ATH10K_FW_IE_FW_CODE_SWAP_IMAGE = 7,
-};
-
-enum ath10k_fw_wmi_op_version {
-	ATH10K_FW_WMI_OP_VERSION_UNSET = 0,
-
-	ATH10K_FW_WMI_OP_VERSION_MAIN = 1,
-	ATH10K_FW_WMI_OP_VERSION_10_1 = 2,
-	ATH10K_FW_WMI_OP_VERSION_10_2 = 3,
-	ATH10K_FW_WMI_OP_VERSION_TLV = 4,
-	ATH10K_FW_WMI_OP_VERSION_10_2_4 = 5,
-	ATH10K_FW_WMI_OP_VERSION_10_4 = 6,
-
-	/* keep last */
-	ATH10K_FW_WMI_OP_VERSION_MAX,
-};
-
-enum ath10k_fw_htt_op_version {
-	ATH10K_FW_HTT_OP_VERSION_UNSET = 0,
-
-	ATH10K_FW_HTT_OP_VERSION_MAIN = 1,
-
-	/* also used in 10.2 and 10.2.4 branches */
-	ATH10K_FW_HTT_OP_VERSION_10_1 = 2,
-
-	ATH10K_FW_HTT_OP_VERSION_TLV = 3,
-
-	ATH10K_FW_HTT_OP_VERSION_10_4 = 4,
-
-	/* keep last */
-	ATH10K_FW_HTT_OP_VERSION_MAX,
-};
-
-enum ath10k_bd_ie_type {
-	/* contains sub IEs of enum ath10k_bd_ie_board_type */
-	ATH10K_BD_IE_BOARD = 0,
-};
-
-enum ath10k_bd_ie_board_type {
-	ATH10K_BD_IE_BOARD_NAME = 0,
-	ATH10K_BD_IE_BOARD_DATA = 1,
-};
-
+/* 225 */
 enum ath10k_hw_rev {
-	ATH10K_HW_QCA988X,
-	ATH10K_HW_QCA6174,
-	ATH10K_HW_QCA99X0,
-	ATH10K_HW_QCA9888,
-	ATH10K_HW_QCA9984,
-	ATH10K_HW_QCA9377,
-	ATH10K_HW_QCA4019,
-	ATH10K_HW_QCA9887,
+        ATH10K_HW_QCA988X,
+        ATH10K_HW_QCA6174,
+        ATH10K_HW_QCA99X0,
+        ATH10K_HW_QCA9888,
+        ATH10K_HW_QCA9984,
+        ATH10K_HW_QCA9377,
+        ATH10K_HW_QCA4019,
+        ATH10K_HW_QCA9887,
 };
 
+/* 236 */
 struct ath10k_hw_regs {
-	u32 rtc_soc_base_address;
-	u32 rtc_wmac_base_address;
-	u32 soc_core_base_address;
-	u32 wlan_mac_base_address;
-	u32 ce_wrapper_base_address;
-	u32 ce0_base_address;
-	u32 ce1_base_address;
-	u32 ce2_base_address;
-	u32 ce3_base_address;
-	u32 ce4_base_address;
-	u32 ce5_base_address;
-	u32 ce6_base_address;
-	u32 ce7_base_address;
-	u32 soc_reset_control_si0_rst_mask;
-	u32 soc_reset_control_ce_rst_mask;
-	u32 soc_chip_id_address;
-	u32 scratch_3_address;
-	u32 fw_indicator_address;
-	u32 pcie_local_base_address;
-	u32 ce_wrap_intr_sum_host_msi_lsb;
-	u32 ce_wrap_intr_sum_host_msi_mask;
-	u32 pcie_intr_fw_mask;
-	u32 pcie_intr_ce_mask_all;
-	u32 pcie_intr_clr_address;
-	u32 cpu_pll_init_address;
-	u32 cpu_speed_address;
-	u32 core_clk_div_address;
+        uint32_t rtc_soc_base_address;
+        uint32_t rtc_wmac_base_address;
+        uint32_t soc_core_base_address;
+        uint32_t wlan_mac_base_address;
+        uint32_t ce_wrapper_base_address;
+        uint32_t ce0_base_address;
+        uint32_t ce1_base_address;
+        uint32_t ce2_base_address;
+        uint32_t ce3_base_address;
+        uint32_t ce4_base_address;
+        uint32_t ce5_base_address;
+        uint32_t ce6_base_address;
+        uint32_t ce7_base_address;
+        uint32_t soc_reset_control_si0_rst_mask;
+        uint32_t soc_reset_control_ce_rst_mask;
+        uint32_t soc_chip_id_address;
+        uint32_t scratch_3_address;
+        uint32_t fw_indicator_address;
+        uint32_t pcie_local_base_address;
+        uint32_t ce_wrap_intr_sum_host_msi_lsb;
+        uint32_t ce_wrap_intr_sum_host_msi_mask;
+        uint32_t pcie_intr_fw_mask;
+        uint32_t pcie_intr_ce_mask_all;
+        uint32_t pcie_intr_clr_address;
+        uint32_t cpu_pll_init_address;
+        uint32_t cpu_speed_address;
+        uint32_t core_clk_div_address;
 };
 
 extern const struct ath10k_hw_regs qca988x_regs;
@@ -269,92 +158,92 @@ extern const struct ath10k_hw_regs qca99x0_regs;
 extern const struct ath10k_hw_regs qca4019_regs;
 
 struct ath10k_hw_ce_regs_addr_map {
-	u32 msb;
-	u32 lsb;
-	u32 mask;
+        uint32_t msb;
+        uint32_t lsb;
+        uint32_t mask;
 };
 
 struct ath10k_hw_ce_ctrl1 {
-	u32 addr;
-	u32 hw_mask;
-	u32 sw_mask;
-	u32 hw_wr_mask;
-	u32 sw_wr_mask;
-	u32 reset_mask;
-	u32 reset;
-	struct ath10k_hw_ce_regs_addr_map *src_ring;
-	struct ath10k_hw_ce_regs_addr_map *dst_ring;
-	struct ath10k_hw_ce_regs_addr_map *dmax; };
+        uint32_t addr;
+        uint32_t hw_mask;
+        uint32_t sw_mask;
+        uint32_t hw_wr_mask;
+        uint32_t sw_wr_mask;
+        uint32_t reset_mask;
+        uint32_t reset;
+        struct ath10k_hw_ce_regs_addr_map *src_ring;
+        struct ath10k_hw_ce_regs_addr_map *dst_ring;
+        struct ath10k_hw_ce_regs_addr_map *dmax; };
 
 struct ath10k_hw_ce_cmd_halt {
-	u32 status_reset;
-	u32 msb;
-	u32 mask;
-	struct ath10k_hw_ce_regs_addr_map *status; };
+        uint32_t status_reset;
+        uint32_t msb;
+        uint32_t mask;
+        struct ath10k_hw_ce_regs_addr_map *status; };
 
 struct ath10k_hw_ce_host_ie {
-	u32 copy_complete_reset;
-	struct ath10k_hw_ce_regs_addr_map *copy_complete; };
+        uint32_t copy_complete_reset;
+        struct ath10k_hw_ce_regs_addr_map *copy_complete; };
 
 struct ath10k_hw_ce_host_wm_regs {
-	u32 dstr_lmask;
-	u32 dstr_hmask;
-	u32 srcr_lmask;
-	u32 srcr_hmask;
-	u32 cc_mask;
-	u32 wm_mask;
-	u32 addr;
+        uint32_t dstr_lmask;
+        uint32_t dstr_hmask;
+        uint32_t srcr_lmask;
+        uint32_t srcr_hmask;
+        uint32_t cc_mask;
+        uint32_t wm_mask;
+        uint32_t addr;
 };
 
 struct ath10k_hw_ce_misc_regs {
-	u32 axi_err;
-	u32 dstr_add_err;
-	u32 srcr_len_err;
-	u32 dstr_mlen_vio;
-	u32 dstr_overflow;
-	u32 srcr_overflow;
-	u32 err_mask;
-	u32 addr;
+        uint32_t axi_err;
+        uint32_t dstr_add_err;
+        uint32_t srcr_len_err;
+        uint32_t dstr_mlen_vio;
+        uint32_t dstr_overflow;
+        uint32_t srcr_overflow;
+        uint32_t err_mask;
+        uint32_t addr;
 };
 
 struct ath10k_hw_ce_dst_src_wm_regs {
-	u32 addr;
-	u32 low_rst;
-	u32 high_rst;
-	struct ath10k_hw_ce_regs_addr_map *wm_low;
-	struct ath10k_hw_ce_regs_addr_map *wm_high; };
+        uint32_t addr;
+        uint32_t low_rst;
+        uint32_t high_rst;
+        struct ath10k_hw_ce_regs_addr_map *wm_low;
+        struct ath10k_hw_ce_regs_addr_map *wm_high; };
 
 struct ath10k_hw_ce_regs {
-	u32 sr_base_addr;
-	u32 sr_size_addr;
-	u32 dr_base_addr;
-	u32 dr_size_addr;
-	u32 ce_cmd_addr;
-	u32 misc_ie_addr;
-	u32 sr_wr_index_addr;
-	u32 dst_wr_index_addr;
-	u32 current_srri_addr;
-	u32 current_drri_addr;
-	u32 ddr_addr_for_rri_low;
-	u32 ddr_addr_for_rri_high;
-	u32 ce_rri_low;
-	u32 ce_rri_high;
-	u32 host_ie_addr;
-	struct ath10k_hw_ce_host_wm_regs *wm_regs;
-	struct ath10k_hw_ce_misc_regs *misc_regs;
-	struct ath10k_hw_ce_ctrl1 *ctrl1_regs;
-	struct ath10k_hw_ce_cmd_halt *cmd_halt;
-	struct ath10k_hw_ce_host_ie *host_ie;
-	struct ath10k_hw_ce_dst_src_wm_regs *wm_srcr;
-	struct ath10k_hw_ce_dst_src_wm_regs *wm_dstr; };
+        uint32_t sr_base_addr;
+        uint32_t sr_size_addr;
+        uint32_t dr_base_addr;
+        uint32_t dr_size_addr;
+        uint32_t ce_cmd_addr;
+        uint32_t misc_ie_addr;
+        uint32_t sr_wr_index_addr;
+        uint32_t dst_wr_index_addr;
+        uint32_t current_srri_addr;
+        uint32_t current_drri_addr;
+        uint32_t ddr_addr_for_rri_low;
+        uint32_t ddr_addr_for_rri_high;
+        uint32_t ce_rri_low;
+        uint32_t ce_rri_high;
+        uint32_t host_ie_addr;
+        struct ath10k_hw_ce_host_wm_regs *wm_regs;
+        struct ath10k_hw_ce_misc_regs *misc_regs;
+        struct ath10k_hw_ce_ctrl1 *ctrl1_regs;
+        struct ath10k_hw_ce_cmd_halt *cmd_halt;
+        struct ath10k_hw_ce_host_ie *host_ie;
+        struct ath10k_hw_ce_dst_src_wm_regs *wm_srcr;
+        struct ath10k_hw_ce_dst_src_wm_regs *wm_dstr; };
 
 struct ath10k_hw_values {
-	u32 rtc_state_val_on;
-	u8 ce_count;
-	u8 msi_assign_ce_max;
-	u8 num_target_ce_config_wlan;
-	u16 ce_desc_meta_data_mask;
-	u8 ce_desc_meta_data_lsb;
+        uint32_t rtc_state_val_on;
+        uint8_t ce_count;
+        uint8_t msi_assign_ce_max;
+        uint8_t num_target_ce_config_wlan;
+        uint16_t ce_desc_meta_data_mask;
+        uint8_t ce_desc_meta_data_lsb;
 };
 
 extern const struct ath10k_hw_values qca988x_values;
@@ -364,9 +253,7 @@ extern const struct ath10k_hw_values qca9888_values;
 extern const struct ath10k_hw_values qca4019_values;
 extern struct ath10k_hw_ce_regs qcax_ce_regs;
 
-void ath10k_hw_fill_survey_time(struct ath10k *ar, struct survey_info *survey,
-				u32 cc, u32 rcc, u32 cc_prev, u32 rcc_prev);
-
+/* 370 */
 #define QCA_REV_988X(ar) ((ar)->hw_rev == ATH10K_HW_QCA988X)
 #define QCA_REV_9887(ar) ((ar)->hw_rev == ATH10K_HW_QCA9887)
 #define QCA_REV_6174(ar) ((ar)->hw_rev == ATH10K_HW_QCA6174)
@@ -376,197 +263,7 @@ void ath10k_hw_fill_survey_time(struct ath10k *ar, struct survey_info *survey,
 #define QCA_REV_9377(ar) ((ar)->hw_rev == ATH10K_HW_QCA9377)
 #define QCA_REV_40XX(ar) ((ar)->hw_rev == ATH10K_HW_QCA4019)
 
-/* Known peculiarities:
- *  - raw appears in nwifi decap, raw and nwifi appear in ethernet decap
- *  - raw have FCS, nwifi doesn't
- *  - ethernet frames have 802.11 header decapped and parts (base hdr, cipher
- *    param, llc/snap) are aligned to 4byte boundaries each
- */
-enum ath10k_hw_txrx_mode {
-	ATH10K_HW_TXRX_RAW = 0,
-
-	/* Native Wifi decap mode is used to align IP frames to 4-byte
-	 * boundaries and avoid a very expensive re-alignment in mac80211.
-	 */
-	ATH10K_HW_TXRX_NATIVE_WIFI = 1,
-	ATH10K_HW_TXRX_ETHERNET = 2,
-
-	/* Valid for HTT >= 3.0. Used for management frames in TX_FRM. */
-	ATH10K_HW_TXRX_MGMT = 3,
-};
-
-enum ath10k_mcast2ucast_mode {
-	ATH10K_MCAST2UCAST_DISABLED = 0,
-	ATH10K_MCAST2UCAST_ENABLED = 1,
-};
-
-enum ath10k_hw_rate_ofdm {
-	ATH10K_HW_RATE_OFDM_48M = 0,
-	ATH10K_HW_RATE_OFDM_24M,
-	ATH10K_HW_RATE_OFDM_12M,
-	ATH10K_HW_RATE_OFDM_6M,
-	ATH10K_HW_RATE_OFDM_54M,
-	ATH10K_HW_RATE_OFDM_36M,
-	ATH10K_HW_RATE_OFDM_18M,
-	ATH10K_HW_RATE_OFDM_9M,
-};
-
-enum ath10k_hw_rate_cck {
-	ATH10K_HW_RATE_CCK_LP_11M = 0,
-	ATH10K_HW_RATE_CCK_LP_5_5M,
-	ATH10K_HW_RATE_CCK_LP_2M,
-	ATH10K_HW_RATE_CCK_LP_1M,
-	ATH10K_HW_RATE_CCK_SP_11M,
-	ATH10K_HW_RATE_CCK_SP_5_5M,
-	ATH10K_HW_RATE_CCK_SP_2M,
-};
-
-enum ath10k_hw_rate_rev2_cck {
-	ATH10K_HW_RATE_REV2_CCK_LP_1M = 1,
-	ATH10K_HW_RATE_REV2_CCK_LP_2M,
-	ATH10K_HW_RATE_REV2_CCK_LP_5_5M,
-	ATH10K_HW_RATE_REV2_CCK_LP_11M,
-	ATH10K_HW_RATE_REV2_CCK_SP_2M,
-	ATH10K_HW_RATE_REV2_CCK_SP_5_5M,
-	ATH10K_HW_RATE_REV2_CCK_SP_11M,
-};
-
-enum ath10k_hw_cc_wraparound_type {
-	ATH10K_HW_CC_WRAP_DISABLED = 0,
-
-	/* This type is when the HW chip has a quirky Cycle Counter
-	 * wraparound which resets to 0x7fffffff instead of 0. All
-	 * other CC related counters (e.g. Rx Clear Count) are divided
-	 * by 2 so they never wraparound themselves.
-	 */
-	ATH10K_HW_CC_WRAP_SHIFTED_ALL = 1,
-
-	/* Each hw counter wrapsaround independently. When the
-	 * counter overflows the repestive counter is right shifted
-	 * by 1, i.e reset to 0x7fffffff, and other counters will be
-	 * running unaffected. In this type of wraparound, it should
-	 * be possible to report accurate Rx busy time unlike the
-	 * first type.
-	 */
-	ATH10K_HW_CC_WRAP_SHIFTED_EACH = 2,
-};
-
-enum ath10k_hw_refclk_speed {
-	ATH10K_HW_REFCLK_UNKNOWN = -1,
-	ATH10K_HW_REFCLK_48_MHZ = 0,
-	ATH10K_HW_REFCLK_19_2_MHZ = 1,
-	ATH10K_HW_REFCLK_24_MHZ = 2,
-	ATH10K_HW_REFCLK_26_MHZ = 3,
-	ATH10K_HW_REFCLK_37_4_MHZ = 4,
-	ATH10K_HW_REFCLK_38_4_MHZ = 5,
-	ATH10K_HW_REFCLK_40_MHZ = 6,
-	ATH10K_HW_REFCLK_52_MHZ = 7,
-
-	/* must be the last one */
-	ATH10K_HW_REFCLK_COUNT,
-};
-
-struct ath10k_hw_clk_params {
-	u32 refclk;
-	u32 div;
-	u32 rnfrac;
-	u32 settle_time;
-	u32 refdiv;
-	u32 outdiv;
-};
-
-struct ath10k_hw_params {
-	u32 id;
-	u16 dev_id;
-	const char *name;
-	u32 patch_load_addr;
-	int uart_pin;
-	u32 otp_exe_param;
-
-	/* Type of hw cycle counter wraparound logic, for more info
-	 * refer enum ath10k_hw_cc_wraparound_type.
-	 */
-	enum ath10k_hw_cc_wraparound_type cc_wraparound_type;
-
-	/* Some of chip expects fragment descriptor to be continuous
-	 * memory for any TX operation. Set continuous_frag_desc flag
-	 * for the hardware which have such requirement.
-	 */
-	bool continuous_frag_desc;
-
-	/* CCK hardware rate table mapping for the newer chipsets
-	 * like QCA99X0, QCA4019 got revised. The CCK h/w rate values
-	 * are in a proper order with respect to the rate/preamble
-	 */
-	bool cck_rate_map_rev2;
-
-	u32 channel_counters_freq_hz;
-
-	/* Mgmt tx descriptors threshold for limiting probe response
-	 * frames.
-	 */
-	u32 max_probe_resp_desc_thres;
-
-	u32 tx_chain_mask;
-	u32 rx_chain_mask;
-	u32 max_spatial_stream;
-	u32 cal_data_len;
-
-	struct ath10k_hw_params_fw {
-		const char *dir;
-		const char *board;
-		size_t board_size;
-		size_t board_ext_size;
-	} fw;
-
-	/* qca99x0 family chips deliver broadcast/multicast management
-	 * frames encrypted and expect software do decryption.
-	 */
-	bool sw_decrypt_mcast_mgmt;
-
-	const struct ath10k_hw_ops *hw_ops;
-
-	/* Number of bytes used for alignment in rx_hdr_status of rx desc. */
-	int decap_align_bytes;
-
-	/* hw specific clock control parameters */
-	const struct ath10k_hw_clk_params *hw_clk;
-	int target_cpu_freq;
-
-	/* Number of bytes to be discarded for each FFT sample */
-	int spectral_bin_discard;
-
-	/* The board may have a restricted NSS for 160 or 80+80 vs what it
-	 * can do for 80Mhz.
-	 */
-	int vht160_mcs_rx_highest;
-	int vht160_mcs_tx_highest;
-};
-
-struct htt_rx_desc;
-
-/* Defines needed for Rx descriptor abstraction */
-struct ath10k_hw_ops {
-	int (*rx_desc_get_l3_pad_bytes)(struct htt_rx_desc *rxd);
-	void (*set_coverage_class)(struct ath10k *ar, s16 value);
-	int (*enable_pll_clk)(struct ath10k *ar);
-};
-
-extern const struct ath10k_hw_ops qca988x_ops;
-extern const struct ath10k_hw_ops qca99x0_ops;
-extern const struct ath10k_hw_ops qca6174_ops;
-
-extern const struct ath10k_hw_clk_params qca6174_clk[];
-
-static inline int
-ath10k_rx_desc_get_l3_pad_bytes(struct ath10k_hw_params *hw,
-				struct htt_rx_desc *rxd)
-{
-	if (hw->hw_ops->rx_desc_get_l3_pad_bytes)
-		return hw->hw_ops->rx_desc_get_l3_pad_bytes(rxd);
-	return 0;
-}
-
+/* 570 */
 /* Target specific defines for MAIN firmware */
 #define TARGET_NUM_VDEVS			8
 #define TARGET_NUM_PEER_AST			2
