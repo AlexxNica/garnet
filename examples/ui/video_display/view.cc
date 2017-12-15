@@ -77,6 +77,7 @@ struct Framebuffer {
       FXL_LOG(ERROR) << "Failed to create event (status: " << result << ").";
       return result;
     }
+    return ZX_OK;
   }
 
   void AddToImagePipe(scenic::ImagePipePtr &image_pipe, const scenic::ImageInfo &info) {
@@ -98,6 +99,7 @@ struct Framebuffer {
     }
     image_pipe->AddImage(image_pipe_id, image_info, std::move(render_vmo),
                          scenic::MemoryType::HOST_MEMORY, buffer_offset);
+    return ZX_OK;
 
   }
 };
@@ -136,26 +138,31 @@ View::View(app::ApplicationContext* application_context,
 
 // this creates our own vmo, which acts like we are getting information from
 // a video source
-  zx::vmo::create(num_buffer * kBufferSize, 0, &vmo_);
   // The video source would also specify image size and the number of buffers:
-  uint32_t number_of_buffers = 5;
   uint32_t width = 640, height = 480, bpp = 1;
-  for (int i = 0; i < 
+  uint64_t buffer_width = width * height * bpp; // this is only true for single plane images...
+  zx::vmo::create(kNumFramebuffers * buffer_width, 0, &vmo_);
+  auto image_info = scenic::ImageInfo::New();
+  image_info->width = width();
+  image_info->height = height();
+  image_info->stride = 0;  // inapplicable to GPU_OPTIMAL tiling.
+  image_info->tiling = scenic::ImageInfo::Tiling::GPU_OPTIMAL;
 
+  for (int i = 0; i < kNumFramebuffers; ++i) {
+    Framebuffer frame_buffer;
+    if (ZX_OK != frame_buffer.Create(buffer_width, i, i*buffer_width, vmo_)) {
+      FXL_LOG(ERROR) << "Failed to construct frame.";
+      return;
+    }
+    if (ZX_OK != frame_buffer.AddToImagePipe(image_pipe_, image_info)) {
+      FXL_LOG(ERROR) << "Failed to add frame to image pipe.";
+      return;
+    }
+    frame_buffers_.push_back(std::move(frame_buffer));
+  }
 }
 
 View::~View() = default;
-
-// this creates our own vmo, which acts like we are getting information from
-// a video source
-void CreateIncomingBuffer(uint64_t num_buffer) {
-  // todo(garratt): check response
-  zx::vmo::create(num_buffer * kBufferSize, 0, &vmo_);
-
-
-
-}
-
 
 
 
@@ -165,6 +172,10 @@ void OnFramePresented(const scenic::PresentationInfoPtr& info){
   auto present_image_callback = [this](scenic::PresentationInfoPtr info) {
       this->OnFramePresented(info);
   };
+  // figure out which frame to display next
+  
+        // fence.signal(0u, ZX_EVENT_SIGNALED);
+
 
   auto acquire_fences = fidl::Array<zx::event>::New(1);
   acquire_fences[0] = std::move(acquire_fence);
