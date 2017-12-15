@@ -50,7 +50,7 @@
     <project name="cobalt"
              path="third_party/cobalt"
              remote="https://fuchsia.googlesource.com/cobalt"
-             revision="0b3208677728f9b8ac108f0e1bd59a6bf65f93b6"
+             revision="579a2eabad3b953b80a1ee0ae9e1ae46dc9d7825"
              gerrithost="https://fuchsia-review.googlesource.com"/>
     <project name="third_party/expat"
              path="third_party/expat"
@@ -87,7 +87,7 @@
     <project name="third_party/go"
              remote="https://fuchsia.googlesource.com/third_party/go"
              gerrithost="https://fuchsia-review.googlesource.com"
-             revision="f68e6f80c24ece54f7309fb4ef0fbee2b492455e"
+             revision="f8b939d1b6bfa7065fd1adb455cb411cb11a6339"
              path="third_party/go"/>
     <project name="go_x_crypto"
              path="third_party/golang/crypto"
@@ -151,6 +151,7 @@
     <project name="third_party/netstack"
              path="third_party/netstack"
              remote="https://fuchsia.googlesource.com/third_party/netstack"
+             revision="1ef6cb0ddbd0f1ea84e763b28bf7f2b104382739"
              gerrithost="https://fuchsia-review.googlesource.com"/>
     <project name="third_party/processor-trace"
              path="third_party/processor-trace"

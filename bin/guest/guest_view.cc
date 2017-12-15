@@ -12,23 +12,28 @@
 static constexpr uint32_t kDisplayWidth = 1024;
 static constexpr uint32_t kDisplayHeight = 768;
 
-ScenicScanout::ScenicScanout(GuestView* view)
-    : view_(view),
-      task_runner_(fsl::MessageLoop::GetCurrent()->task_runner()) {}
+ScenicScanout::ScenicScanout(GuestView* view) {}
 
 void ScenicScanout::FlushRegion(const virtio_gpu_rect_t& rect) {
   GpuScanout::FlushRegion(rect);
-  task_runner_->PostTask([this] { view_->InvalidateScene(); });
 }
 
-static int view_task(void* ctx) {
-  fsl::MessageLoop loop;
+struct ViewTaskArgs {
+  machina::VirtioGpu* gpu;
+  machina::InputDispatcher* input_dispatcher;
+};
 
-  mozart::ViewProviderApp app([ctx](mozart::ViewContext view_context) {
-    return std::make_unique<GuestView>(
-        reinterpret_cast<machina::VirtioGpu*>(ctx),
-        std::move(view_context.view_manager),
+static int view_task(void* ctx) {
+  ViewTaskArgs* args = reinterpret_cast<ViewTaskArgs*>(ctx);
+
+  fsl::MessageLoop loop;
+  mozart::ViewProviderApp app([args](mozart::ViewContext view_context) {
+    auto view = std::make_unique<GuestView>(
+        args->gpu, args->input_dispatcher, std::move(view_context.view_manager),
         std::move(view_context.view_owner_request));
+
+    delete args;
+    return view;
   });
 
   loop.Run();
@@ -36,9 +41,14 @@ static int view_task(void* ctx) {
 }
 
 // static
-zx_status_t GuestView::Start(machina::VirtioGpu* gpu) {
+zx_status_t GuestView::Start(machina::VirtioGpu* gpu,
+                             machina::InputDispatcher* input_dispatcher) {
+  ViewTaskArgs* args = new ViewTaskArgs;
+  args->gpu = gpu;
+  args->input_dispatcher = input_dispatcher;
+
   thrd_t thread;
-  int ret = thrd_create(&thread, view_task, gpu);
+  int ret = thrd_create(&thread, view_task, args);
   if (ret != thrd_success) {
     return ZX_ERR_INTERNAL;
   }
@@ -52,12 +62,14 @@ zx_status_t GuestView::Start(machina::VirtioGpu* gpu) {
 
 GuestView::GuestView(
     machina::VirtioGpu* gpu,
+    machina::InputDispatcher* input_dispatcher,
     mozart::ViewManagerPtr view_manager,
     fidl::InterfaceRequest<mozart::ViewOwner> view_owner_request)
     : BaseView(std::move(view_manager), std::move(view_owner_request), "Guest"),
       background_node_(session()),
       material_(session()),
-      scanout_(this) {
+      scanout_(this),
+      input_dispatcher_(input_dispatcher) {
   background_node_.SetMaterial(material_);
   parent_node().AddChild(background_node_);
 
@@ -96,4 +108,32 @@ void GuestView::OnSceneInvalidated(
 
   scenic_lib::HostImage image(*memory_, 0u, image_info_.Clone());
   material_.SetTexture(image);
+
+  // TODO(MZ-403): Move this into ScenicScanout::FlushRegion.
+  InvalidateScene();
+}
+
+bool GuestView::OnInputEvent(mozart::InputEventPtr event) {
+  if (event->is_keyboard()) {
+    const mozart::KeyboardEventPtr& key_event = event->get_keyboard();
+
+    machina::InputEvent event;
+    event.type = machina::InputEventType::KEYBOARD;
+    event.key.hid_usage = key_event->hid_usage;
+    switch (key_event->phase) {
+      case mozart::KeyboardEvent::Phase::PRESSED:
+        event.key.state = machina::KeyState::PRESSED;
+        break;
+      case mozart::KeyboardEvent::Phase::RELEASED:
+      case mozart::KeyboardEvent::Phase::CANCELLED:
+        event.key.state = machina::KeyState::RELEASED;
+        break;
+      default:
+        // Ignore events for unsupported phases.
+        return true;
+    }
+    input_dispatcher_->PostEvent(event, true);
+    return true;
+  }
+  return false;
 }

@@ -18,16 +18,15 @@ executable("bin") {
       "app.h",
       "categories.cc",
       "categories.h",
-      "events.cc",
-      "events.h",
       "importer.cc",
       "importer.h",
-      "reader.cc",
-      "reader.h",
+      "intel-pm-categories.inc",
+      "skylake-pm-categories.inc",
     ]
   }
 
   deps = [
+    "//garnet/lib/cpuperf",
     "//garnet/public/lib/app/cpp",
     "//garnet/public/lib/fxl",
     "//garnet/public/lib/fsl",
