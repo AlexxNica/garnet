@@ -11,13 +11,14 @@
 
 #include "buffer.h"
 
-Buffer *Buffer::NewBuffer(uint32_t width, uint32_t height) {
+// Buffer *Buffer::NewBuffer(uint32_t width, uint32_t height) {
+Buffer *Buffer::NewBuffer(uint32_t width, uint32_t height, zx::vmo &main_buffer, uint64_t offset) {
     uint64_t buffer_size = width * height * 4;
     zx::vmo vmo;
-    zx_status_t err = zx::vmo::create(buffer_size, 0, &vmo);
+    zx_status_t err = main_buffer.duplicate(ZX_RIGHT_SAME_RIGHTS, &vmo);
     if (err != ZX_OK) {
-        printf("Can't create %ld bytes vmo.\n", buffer_size);
-        return nullptr;
+      FXL_LOG(ERROR) << "Failed to duplicate vmo (status: " << err << ").";
+      return nullptr;
     }
 
     zx::event acquire_fence;
@@ -37,7 +38,7 @@ Buffer *Buffer::NewBuffer(uint32_t width, uint32_t height) {
 
     uintptr_t ptr;
     err = zx::vmar::root_self().map(
-        0, vmo, 0, buffer_size,
+        0, vmo, offset, buffer_size,
         ZX_VM_FLAG_PERM_READ | ZX_VM_FLAG_PERM_WRITE,
         &ptr);
     if (err != ZX_OK) {
@@ -52,6 +53,7 @@ Buffer *Buffer::NewBuffer(uint32_t width, uint32_t height) {
     b->size_ = buffer_size;
     b->width_ = width;
     b->height_ = height;
+    b->vmo_offset_ = offset;
 
     b->acquire_fence_ = std::move(acquire_fence);
     b->release_fence_ = std::move(release_fence);

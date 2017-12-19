@@ -105,6 +105,62 @@ struct Framebuffer {
 };
 
 
+using BufferNotifier  = fbl::Function<void(uint32_t index)>;
+
+class BufferHandler {
+ public:
+  BufferHandler(Buffer *buffer, uint32_t index, BufferNotifier notifier) :
+      buffer_(buffer),
+      index_(index),
+      notifier_(fbl::move(notifier)),
+      wait_(fsl::MessageLoop::GetCurrent()->async(),
+            buffer->release_fence().get(), ZX_EVENT_SIGNALED) {
+    wait_.set_handler(fbl::BindMember(this, &BufferHandler::Handler));
+    auto status = wait_.Begin();
+    FXL_DCHECK(status == ZX_OK);
+  }
+
+  ~BufferHandler() = default;
+
+  async_wait_result_t Handler(async_t* async, zx_status_t status,
+                              const zx_packet_signal* signal) {
+      if (status != ZX_OK) {
+        FXL_LOG(ERROR) << "BufferHandler received an error ("
+                       << zx_status_get_string(status) << ").  Exiting.";
+        wait_.Cancel();
+        return ASYNC_WAIT_FINISHED;
+      }
+
+      buffer_->Reset();
+
+      auto acq = fidl::Array<zx::event>::New(1);
+      auto rel = fidl::Array<zx::event>::New(1);
+      buffer_->dupAcquireFence(&acq.front());
+      buffer_->dupReleaseFence(&rel.front());
+
+      image_pipe->PresentImage(index_, 0, std::move(acq), std::move(rel),
+                               [](scenic::PresentationInfoPtr info) {});
+
+      uint8_t r, g, b;
+      hsv_color(hsv_index, &r, &g, &b);
+      hsv_index = hsv_inc(hsv_index, 3);
+      buffer_->Fill(r, g, b);
+
+      buffer_->Signal();
+      return ASYNC_WAIT_AGAIN;
+  }
+
+ private:
+  Buffer *buffer_;
+  uint32_t index_;
+  BufferNotifier notifier_;
+  async::AutoWait wait_;
+};
+
+
+
+
+
 
 View::View(app::ApplicationContext* application_context,
            mozart::ViewManagerPtr view_manager,
