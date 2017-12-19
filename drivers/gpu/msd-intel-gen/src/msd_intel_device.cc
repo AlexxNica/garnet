@@ -255,13 +255,9 @@ bool MsdIntelDevice::Init(void* device_handle)
 
     PerProcessGtt::InitPrivatePat(register_io_.get());
 
-#if MSD_INTEL_ENABLE_MAPPING_CACHE
-    mapping_cache_ = GpuMappingCache::Create();
-#endif
+    gtt_ = std::shared_ptr<Gtt>(Gtt::CreateShim(this));
 
-    gtt_ = std::make_shared<Gtt>(mapping_cache_);
-
-    if (!gtt_->Init(gtt_size, platform_device_.get()))
+    if (!gtt_->Init(gtt_size))
         return DRETF(false, "failed to Init gtt");
 
     // Arbitrary
@@ -551,7 +547,7 @@ int MsdIntelDevice::DeviceThreadLoop()
             // before returning here to wait.
             bool timed_out = !device_request_semaphore_->Wait(kTimeoutMs);
             if (timed_out)
-                SuspectedGpuHang();
+                HangCheckTimeout();
         } else {
             DLOG("waiting, no timeout");
             device_request_semaphore_->Wait();
@@ -674,11 +670,20 @@ magma::Status MsdIntelDevice::ProcessDumpStatusToLog()
     return MAGMA_STATUS_OK;
 }
 
-void MsdIntelDevice::SuspectedGpuHang()
+void MsdIntelDevice::HangCheckTimeout()
 {
     std::string s;
     DumpToString(s);
     uint32_t master_interrupt_control = registers::MasterInterruptControl::read(register_io_.get());
+    if (master_interrupt_control &
+        registers::MasterInterruptControl::kRenderInterruptsPendingBitMask) {
+        magma::log(magma::LOG_WARNING,
+                   "Hang check timeout while pending render interrupt; slow interrupt handler?\n"
+                   "last submitted sequence number 0x%x master_interrupt_control 0x%08x\n%s",
+                   progress_->last_submitted_sequence_number(), master_interrupt_control,
+                   s.c_str());
+        return;
+    }
     magma::log(magma::LOG_WARNING,
                "Suspected GPU hang: last submitted sequence number "
                "0x%x master_interrupt_control 0x%08x\n%s",

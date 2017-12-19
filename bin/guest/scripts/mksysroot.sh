@@ -5,27 +5,10 @@
 # Use of this source code is governed by a MIT-style
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT
-#
-# Download and build toybox to be an initrd for linux
-# and download and build dash as the system shell.
-#
-# More additions to come as and when desired / needed.
 
 set -eo pipefail
 
 GUEST_SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-
-# Where the toybox sources are expected to be.
-TOYBOX_SRC_DIR="/tmp/toybox"
-
-# Toybox initrd file.
-TOYBOX_INITRD="$TOYBOX_SRC_DIR/initrd.gz"
-
-# Toybox root filesystem image.
-TOYBOX_ROOTFS="$TOYBOX_SRC_DIR/rootfs.ext2"
-
-# Where to prep the toybox directory structure.
-TOYBOX_SYSROOT="$TOYBOX_SRC_DIR/fs"
 
 # Where the dash sources are expected to be.
 DASH_SRC_DIR="/tmp/dash"
@@ -193,6 +176,18 @@ x86)
 *)
   usage;;
 esac
+
+# Where the toybox sources are expected to be.
+TOYBOX_SRC_DIR="${TOYBOX_SRC_DIR:-/tmp/toybox-${ARCH}}"
+
+# Toybox initrd file.
+TOYBOX_INITRD="$TOYBOX_SRC_DIR/initrd.gz"
+
+# Toybox root filesystem image.
+TOYBOX_ROOTFS="$TOYBOX_SRC_DIR/rootfs.ext2"
+
+# Where to prep the toybox directory structure.
+TOYBOX_SYSROOT="$TOYBOX_SRC_DIR/fs"
 
 # Do we have something to build?
 if [[ ! "${BUILD_INITRD}" = "true" ]] && [[ ! "${BUILD_ROOTFS}" = "true" ]]; then

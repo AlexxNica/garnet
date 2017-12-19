@@ -23,14 +23,16 @@
 #include "garnet/bin/guest/linux.h"
 #include "garnet/bin/guest/zircon.h"
 #include "garnet/lib/machina/address.h"
-#include "garnet/lib/machina/balloon.h"
-#include "garnet/lib/machina/block.h"
 #include "garnet/lib/machina/framebuffer_scanout.h"
-#include "garnet/lib/machina/gpu.h"
-#include "garnet/lib/machina/input.h"
+#include "garnet/lib/machina/hid_event_source.h"
+#include "garnet/lib/machina/input_dispatcher.h"
 #include "garnet/lib/machina/interrupt_controller.h"
 #include "garnet/lib/machina/pci.h"
 #include "garnet/lib/machina/uart.h"
+#include "garnet/lib/machina/virtio_balloon.h"
+#include "garnet/lib/machina/virtio_block.h"
+#include "garnet/lib/machina/virtio_gpu.h"
+#include "garnet/lib/machina/virtio_input.h"
 
 #if __aarch64__
 #include "garnet/lib/machina/arch/arm64/pl031.h"
@@ -44,6 +46,7 @@ static const uint64_t kUartBases[kNumUarts] = {
 #include <hypervisor/x86/acpi.h>
 #include <hypervisor/x86/local_apic.h>
 #include "garnet/lib/machina/arch/x86/io_port.h"
+#include "garnet/lib/machina/arch/x86/page_table.h"
 #include "garnet/lib/machina/arch/x86/tpm.h"
 
 static const char kDsdtPath[] = "/pkg/data/dsdt.aml";
@@ -68,6 +71,7 @@ static zx_status_t create_vmo(uint64_t size,
 #endif
 
 static const uint64_t kVmoSize = 1u << 30;
+static const size_t kInputQueueDepth = 64;
 
 // Unused memory above this threshold may be reclaimed by the balloon.
 static uint32_t balloon_threshold_pages = 1024;
@@ -187,8 +191,10 @@ zx_status_t setup_zircon_framebuffer(
   return gpu->AddScanout(scanout->get());
 }
 
-zx_status_t setup_scenic_framebuffer(machina::VirtioGpu* gpu) {
-  return GuestView::Start(gpu);
+zx_status_t setup_scenic_framebuffer(
+    machina::VirtioGpu* gpu,
+    machina::InputDispatcher* input_dispatcher) {
+  return GuestView::Start(gpu, input_dispatcher);
 }
 
 int main(int argc, char** argv) {
@@ -258,7 +264,7 @@ int main(int argc, char** argv) {
   uintptr_t pt_end_off = 0;
 
 #if __x86_64__
-  status = guest.CreatePageTable(&pt_end_off);
+  status = machina::create_page_table(physmem_addr, physmem_size, &pt_end_off);
   if (status != ZX_OK) {
     fprintf(stderr, "Failed to create page table\n");
     return status;
@@ -399,23 +405,7 @@ int main(int argc, char** argv) {
     return status;
   }
 
-  // Setup block device.
-  machina::VirtioBlock block(physmem_addr, physmem_size);
-  machina::PciDevice& virtio_block = block.pci_device();
-  if (block_path != NULL) {
-    status = block.Init(block_path, guest.phys_mem());
-    if (status != ZX_OK)
-      return status;
-
-    status = block.Start();
-    if (status != ZX_OK)
-      return status;
-
-    status = bus.Connect(&virtio_block, PCI_DEVICE_VIRTIO_BLOCK);
-    if (status != ZX_OK)
-      return status;
-  }
-  // Setup memory balloon.
+  // Setup balloon device.
   machina::VirtioBalloon balloon(physmem_addr, physmem_size,
                                  guest.phys_mem().vmo());
   balloon.set_deflate_on_demand(balloon_deflate_on_demand);
@@ -424,31 +414,57 @@ int main(int argc, char** argv) {
     return status;
   if (balloon_poll_interval > 0)
     poll_balloon_stats(&balloon, balloon_poll_interval);
-  // Setup Virtio GPU.
-  machina::VirtioGpu gpu(physmem_addr, physmem_size);
-  machina::VirtioInput input(physmem_addr, physmem_size, "zircon-input",
-                             "serial-number");
-  fbl::unique_ptr<machina::GpuScanout> gpu_scanout;
-  status = setup_zircon_framebuffer(&gpu, &gpu_scanout);
-  if (status != ZX_OK) {
-    status = setup_scenic_framebuffer(&gpu);
+
+  // Setup block device.
+  machina::VirtioBlock block(physmem_addr, physmem_size);
+  if (block_path != NULL) {
+    status = block.Init(block_path, guest.phys_mem());
+    if (status != ZX_OK)
+      return status;
+    status = block.Start();
+    if (status != ZX_OK)
+      return status;
+    status = bus.Connect(&block.pci_device(), PCI_DEVICE_VIRTIO_BLOCK);
     if (status != ZX_OK)
       return status;
   }
 
-  status = gpu.Init();
-  if (status != ZX_OK)
-    return status;
-
-  status = bus.Connect(&gpu.pci_device(), PCI_DEVICE_VIRTIO_GPU);
-  if (status != ZX_OK)
-    return status;
-
   // Setup input device.
+  machina::InputDispatcher input_dispatcher(kInputQueueDepth);
+  machina::HidEventSource hid_event_source(&input_dispatcher);
+  machina::VirtioInput input(&input_dispatcher, physmem_addr, physmem_size,
+                             "machina-input", "serial-number");
   status = input.Start();
   if (status != ZX_OK)
     return status;
   status = bus.Connect(&input.pci_device(), PCI_DEVICE_VIRTIO_INPUT);
+  if (status != ZX_OK)
+    return status;
+
+  // Setup GPU device.
+  machina::VirtioGpu gpu(physmem_addr, physmem_size);
+  fbl::unique_ptr<machina::GpuScanout> gpu_scanout;
+  status = setup_zircon_framebuffer(&gpu, &gpu_scanout);
+  if (status == ZX_OK) {
+    // If we were able to acquire the zircon framebuffer then no compositor
+    // is present. In this case we should read input events directly from the
+    // input devics.
+    status = hid_event_source.Start();
+    if (status != ZX_OK) {
+      return status;
+    }
+  } else {
+    // Expose a view that can be composited by mozart. Input events will be
+    // injected by the view events.
+    status = setup_scenic_framebuffer(&gpu, &input_dispatcher);
+    if (status != ZX_OK) {
+      return status;
+    }
+  }
+  status = gpu.Init();
+  if (status != ZX_OK)
+    return status;
+  status = bus.Connect(&gpu.pci_device(), PCI_DEVICE_VIRTIO_GPU);
   if (status != ZX_OK)
     return status;
 

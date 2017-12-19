@@ -11,6 +11,7 @@
 #include <virtio/virtio_ids.h>
 
 #include "garnet/lib/machina/virtio.h"
+#include "lib/fxl/logging.h"
 
 namespace machina {
 
@@ -202,6 +203,7 @@ zx_status_t VirtioPci::CommonCfgRead(uint64_t addr, IoValue* value) const {
       value->u32 = 0;
       return ZX_OK;
   }
+  FXL_LOG(ERROR) << "Unhandled common config read 0x" << std::hex << addr;
   return ZX_ERR_NOT_SUPPORTED;
 }
 
@@ -228,7 +230,7 @@ zx_status_t VirtioPci::ConfigBarRead(uint64_t addr, IoValue* value) const {
     uint64_t device_offset = addr - kVirtioPciDeviceCfgBase;
     return device_->ReadConfig(device_offset, value);
   }
-  fprintf(stderr, "Unhandled read %#lx\n", addr);
+  FXL_LOG(ERROR) << "Unhandled config BAR read 0x" << std::hex << addr;
   return ZX_ERR_NOT_SUPPORTED;
 }
 
@@ -280,7 +282,7 @@ zx_status_t VirtioPci::CommonCfgWrite(uint64_t addr, const IoValue& value) {
       if (value.access_size != 2)
         return ZX_ERR_IO_DATA_INTEGRITY;
       if (value.u16 >= device_->num_queues_)
-        return ZX_ERR_NOT_SUPPORTED;
+        return ZX_ERR_OUT_OF_RANGE;
 
       fbl::AutoLock lock(&device_->mutex_);
       device_->queue_sel_ = value.u16;
@@ -322,9 +324,10 @@ zx_status_t VirtioPci::CommonCfgWrite(uint64_t addr, const IoValue& value) {
     case VIRTIO_PCI_COMMON_CFG_NUM_QUEUES:
     case VIRTIO_PCI_COMMON_CFG_CONFIG_GEN:
     case VIRTIO_PCI_COMMON_CFG_DEVICE_FEATURES:
-      fprintf(stderr, "Unsupported write to %#lx\n", addr);
+      FXL_LOG(ERROR) << "Unsupported write 0x" << std::hex << addr;
       return ZX_ERR_NOT_SUPPORTED;
   }
+  FXL_LOG(ERROR) << "Unhandled common config write 0x" << std::hex << addr;
   return ZX_ERR_NOT_SUPPORTED;
 }
 
@@ -342,7 +345,7 @@ zx_status_t VirtioPci::ConfigBarWrite(uint64_t addr, const IoValue& value) {
     uint64_t device_offset = addr - kVirtioPciDeviceCfgBase;
     return device_->WriteConfig(device_offset, value);
   }
-  fprintf(stderr, "Unhandled write %#lx\n", addr);
+  FXL_LOG(ERROR) << "Unhandled config BAR write 0x" << std::hex << addr;
   return ZX_ERR_NOT_SUPPORTED;
 }
 
@@ -388,7 +391,7 @@ void VirtioPci::SetupCaps() {
            sizeof(device_cfg_cap_), device_->device_config_size_, kVirtioPciBar,
            kVirtioPciDeviceCfgBase);
 
-  // Note VIRTIO_PCI_CAP_PCI_CFG is not implmeneted.
+  // Note VIRTIO_PCI_CAP_PCI_CFG is not implemented.
   // This one is more complex since it is writable and doesn't seem to be
   // used by Linux or Zircon.
 
@@ -396,8 +399,9 @@ void VirtioPci::SetupCaps() {
                 "Incorrect number of capabilities.");
   set_capabilities(capabilities_, kVirtioPciNumCapabilities);
 
-  static_assert(kVirtioPciBar < PCI_MAX_BARS,
-                "Not enough BAR registers available.");
+  static_assert(
+      kVirtioPciBar < PCI_MAX_BARS && kVirtioPciNotifyBar < PCI_MAX_BARS,
+      "Not enough BAR registers available.");
   bar_[kVirtioPciBar].size = static_cast<uint32_t>(
       kVirtioPciDeviceCfgBase + device_->device_config_size_);
   bar_[kVirtioPciBar].trap_type = TrapType::MMIO_SYNC;
@@ -410,12 +414,16 @@ static constexpr uint16_t virtio_pci_id(uint16_t virtio_id) {
 static constexpr uint32_t virtio_pci_class_code(uint16_t virtio_id) {
   // See PCI LOCAL BUS SPECIFICATION, REV. 3.0 Section D.
   switch (virtio_id) {
+    case VIRTIO_ID_BALLOON:
+      return 0x05000000;
     case VIRTIO_ID_BLOCK:
       return 0x01800000;
     case VIRTIO_ID_GPU:
       return 0x03808000;
     case VIRTIO_ID_INPUT:
       return 0x09800000;
+    case VIRTIO_ID_NET:
+      return 0x02000000;
   }
   return 0;
 }
@@ -454,6 +462,7 @@ zx_status_t VirtioPci::ReadBar(uint8_t bar,
     case kVirtioPciBar:
       return ConfigBarRead(offset, value);
   }
+  FXL_LOG(ERROR) << "Unhandled read of BAR " << bar;
   return ZX_ERR_NOT_SUPPORTED;
 }
 
@@ -466,6 +475,7 @@ zx_status_t VirtioPci::WriteBar(uint8_t bar,
     case kVirtioPciNotifyBar:
       return NotifyBarWrite(offset, value);
   }
+  FXL_LOG(ERROR) << "Unhandled write to BAR " << bar;
   return ZX_ERR_NOT_SUPPORTED;
 }
 
@@ -474,9 +484,6 @@ zx_status_t VirtioPci::NotifyBarWrite(uint64_t offset, const IoValue& value) {
     return ZX_ERR_INVALID_ARGS;
 
   uint64_t notify_queue = offset / kVirtioPciNotifyCfgMultiplier;
-  if (notify_queue >= device_->num_queues())
-    return ZX_ERR_INVALID_ARGS;
-
   return device_->Kick(static_cast<uint16_t>(notify_queue));
 }
 

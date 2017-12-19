@@ -29,9 +29,27 @@ bool MsdIntelDeviceCore::Init(void* device_handle)
 
     register_io_ = std::unique_ptr<RegisterIo>(new RegisterIo(std::move(mmio)));
 
+    gtt_ = Gtt::CreateCore(this);
+
     interrupt_manager_ = InterruptManager::CreateCore(this);
     if (!interrupt_manager_)
         return DRETF(false, "failed to create interrupt manager");
 
+    // Register for all interrupts
+    if (!interrupt_manager_->RegisterCallback(InterruptCallback, this, ~0))
+        return DRETF(false, "failed to register callback");
+
     return true;
+}
+
+void MsdIntelDeviceCore::InterruptCallback(void* data, uint32_t master_interrupt_control)
+{
+    DASSERT(data);
+    auto device = reinterpret_cast<MsdIntelDeviceCore*>(data);
+
+    uint32_t status = device->forwarding_mask_ & master_interrupt_control;
+    if (status == 0)
+        return;
+
+    device->forwarding_callback_(device->forwarding_data_, status);
 }

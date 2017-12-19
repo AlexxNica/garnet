@@ -2,15 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <regex.h>
 #include <fstream>
 #include <functional>
 #include <string>
+#include <thread>
 #include <vector>
 
+#include <async/loop.h>
 #include <benchmark/benchmark.h>
 #include <gflags/gflags.h>
+#include <trace-provider/provider.h>
+#include <trace/event.h>
 #include <zircon/syscalls.h>
 
+#include "lib/fxl/logging.h"
 #include "third_party/rapidjson/rapidjson/ostreamwrapper.h"
 #include "third_party/rapidjson/rapidjson/writer.h"
 
@@ -21,6 +27,21 @@
 DEFINE_string(fbenchmark_out, "", "Filename to write results to");
 DEFINE_uint32(fbenchmark_runs, 1000,
               "Number of times to run each test (default is 1000)");
+// Note that an empty regular expression matches any string.
+DEFINE_string(fbenchmark_filter,
+              "",
+              "Regular expression that specifies a subset of tests to run.  "
+              "By default, all the tests are run");
+
+// Tracing-related options.  See README.md for background.
+DEFINE_bool(fbenchmark_enable_tracing,
+            false,
+            "Enable use of Fuchsia tracing: "
+            "Enable registering as a TraceProvider");
+DEFINE_double(fbenchmark_startup_delay,
+              0,
+              "Delay in seconds to wait on startup, after registering a "
+              "TraceProvider");
 
 // Command line arguments used internally for launching subprocesses.
 DEFINE_uint32(channel_read, 0, "Launch a process to read from a channel");
@@ -37,7 +58,40 @@ typedef std::vector<std::pair<std::string, std::function<TestCaseInterface*()>>>
 // items have been added to the list, because that would clobber the list.
 TestList* g_tests;
 
-void RunTests(uint32_t run_count, std::ostream* stream) {
+// We generate two versions of this loop (with and without tracing) because
+// the overhead of TRACE_DURATION() is high enough that we want to avoid it
+// when tracing is not enabled.
+template <bool tracing_enabled>
+void RunSingleTest(TestCaseInterface* test_instance,
+                   uint64_t* time_points,
+                   uint32_t run_count) {
+  time_points[0] = zx_ticks_get();
+  for (uint32_t idx = 0; idx < run_count; ++idx) {
+    if (tracing_enabled) {
+      TRACE_DURATION("benchmark", "test_run");
+      test_instance->Run();
+    } else {
+      test_instance->Run();
+    }
+    time_points[idx + 1] = zx_ticks_get();
+  }
+}
+
+bool RunTests(uint32_t run_count,
+              std::ostream* stream,
+              const char* regex_string) {
+  // Compile the regular expression.
+  regex_t regex;
+  int err = regcomp(&regex, regex_string, REG_EXTENDED);
+  if (err != 0) {
+    char msg[100];
+    msg[0] = '\0';
+    regerror(err, &regex, msg, sizeof(msg));
+    fprintf(stderr, "Compiling the regular expression \"%s\" failed: %s\n",
+            regex_string, msg);
+    return false;
+  }
+
   rapidjson::OStreamWrapper stream_wrapper(*stream);
   rapidjson::Writer<rapidjson::OStreamWrapper> writer(stream_wrapper);
 
@@ -46,21 +100,28 @@ void RunTests(uint32_t run_count, std::ostream* stream) {
   uint64_t* time_points = new uint64_t[run_count + 1];
   writer.StartArray();
 
+  bool found_match = false;
   for (auto& pair : *g_tests) {
+    const char* test_name = pair.first.c_str();
+    bool matched_regex = regexec(&regex, test_name, 0, nullptr, 0) == 0;
+    if (!matched_regex)
+      continue;
+    found_match = true;
+
     // Log in a format similar to gtest's output.
-    printf("[ RUN      ] %s\n", pair.first.c_str());
+    printf("[ RUN      ] %s\n", test_name);
 
     TestCaseInterface* test_instance = pair.second();
 
-    time_points[0] = zx_ticks_get();
-    for (uint32_t idx = 0; idx < run_count; ++idx) {
-      test_instance->Run();
-      time_points[idx + 1] = zx_ticks_get();
+    if (TRACE_CATEGORY_ENABLED("benchmark")) {
+      RunSingleTest<true>(test_instance, time_points, run_count);
+    } else {
+      RunSingleTest<false>(test_instance, time_points, run_count);
     }
 
     delete test_instance;
 
-    printf("[       OK ] %s\n", pair.first.c_str());
+    printf("[       OK ] %s\n", test_name);
 
     writer.StartObject();
     writer.Key("label");
@@ -84,6 +145,16 @@ void RunTests(uint32_t run_count, std::ostream* stream) {
 
   writer.EndArray();
   delete[] time_points;
+
+  regfree(&regex);
+  if (!found_match) {
+    // Report an error so that this doesn't fail silently if the regex is
+    // wrong.
+    fprintf(stderr, "The regular expression \"%s\" did not match any tests\n",
+            regex_string);
+    return false;
+  }
+  return true;
 }
 
 // Run the tests in a way that is suitable for running on the bots via
@@ -93,7 +164,7 @@ void RunFastTests() {
   // runs works OK.
   uint32_t run_count = 5;
   std::ofstream null_stream;
-  RunTests(run_count, &null_stream);
+  FXL_CHECK(RunTests(run_count, &null_stream, ""));
 }
 
 }  // namespace
@@ -105,6 +176,16 @@ void RegisterTestFactory(const char* name,
   if (!g_tests)
     g_tests = new TestList;
   g_tests->push_back(std::make_pair(name, factory_func));
+}
+
+// Start running a TraceProvider in a background thread.
+void StartTraceProvider() {
+  std::thread thread([] {
+    async::Loop loop;
+    trace::TraceProvider provider(loop.async());
+    loop.Run();
+  });
+  thread.detach();
 }
 
 int BenchmarksMain(int argc, char** argv, bool run_gbenchmark) {
@@ -120,10 +201,16 @@ int BenchmarksMain(int argc, char** argv, bool run_gbenchmark) {
     return 0;
   }
 
+  if (FLAGS_fbenchmark_enable_tracing)
+    StartTraceProvider();
+  zx_nanosleep(zx_deadline_after(ZX_SEC(1) * FLAGS_fbenchmark_startup_delay));
+
   if (FLAGS_fbenchmark_out != "") {
     std::ofstream stream(FLAGS_fbenchmark_out);
-    RunTests(FLAGS_fbenchmark_runs, &stream);
+    bool success = RunTests(FLAGS_fbenchmark_runs, &stream,
+                            FLAGS_fbenchmark_filter.c_str());
     stream.close();
+    return success ? 0 : 1;
   } else if (run_gbenchmark) {
     benchmark::RunSpecifiedBenchmarks();
   } else {

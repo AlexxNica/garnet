@@ -6,13 +6,13 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT
 
-set -e
+set -eo pipefail
 
 GUEST_SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 FUCHSIA_DIR="${GUEST_SCRIPTS_DIR}/../../../.."
 cd "${FUCHSIA_DIR}"
 
-DEFAULT_GN_PACKAGES="garnet/packages/guest,garnet/packages/runtime,garnet/packages/runtime_config"
+DEFAULT_GN_PACKAGES="garnet/packages/guest,garnet/packages/runtime,garnet/packages/runtime_config,garnet/packages/netstack"
 
 usage() {
   echo "usage: ${0} [options] {arm64, x86}"
