@@ -24,21 +24,22 @@ struct Buffer {
   void dupAcquireFence(zx::event *result) {
      acquire_fence_.duplicate(ZX_RIGHT_SAME_RIGHTS, result);
   }
-
+  
   void dupReleaseFence(zx::event *result) {
      release_fence_.duplicate(ZX_RIGHT_SAME_RIGHTS, result);
   }
 
   void dupVmo(zx::vmo *result) {
-     vmo_.duplicate(ZX_RIGHT_SAME_RIGHTS, result);
+     vmo_.duplicate(ZX_RIGHT_SAME_RIGHTS & ~ZX_RIGHT_WRITE, result);
   }
 
-  static Buffer *NewBuffer(uint32_t width, uint32_t height);
+  static Buffer *NewBuffer(uint32_t width, uint32_t height, zx::vmo &main_buffer, uint64_t offset);
 
  private:
   Buffer() {};
 
   zx::vmo vmo_;
+  uint64_t vmo_offset;
   uint32_t *pixels_;
   uint64_t size_;
   uint32_t width_;
