@@ -19,6 +19,7 @@
 #define _CORE_H_
 
 #define _ALL_SOURCE
+#include <stdatomic.h>
 #include <threads.h>
 #include <pthread.h>
 
@@ -45,6 +46,11 @@ static inline uint32_t host_interest_item_address(uint32_t item_offset)
 {
         return QCA988X_HOST_INTEREST_ADDRESS + item_offset;
 }
+
+/* 154 */
+struct ath10k_bmi {
+        bool done_sent;
+};
 
 /* 443 */
 /* Copy Engine register dump, protected by ce-lock */
@@ -100,6 +106,33 @@ enum ath10k_state {
 	ATH10K_STATE_UTF,
 };
 
+/* 616 */
+enum ath10k_dev_flags {
+        /* Indicates that ath10k device is during CAC phase of DFS */
+        ATH10K_CAC_RUNNING = 1 << 0,
+        ATH10K_FLAG_CORE_REGISTERED = 1 << 1,
+
+        /* Device has crashed and needs to restart. This indicates any pending
+         * waiters should immediately cancel instead of waiting for a time out.
+         */
+        ATH10K_FLAG_CRASH_FLUSH = 1 << 2,
+
+        /* Use Raw mode instead of native WiFi Tx/Rx encap mode.
+         * Raw mode supports both hardware and software crypto. Native WiFi only
+         * supports hardware crypto.
+         */
+        ATH10K_FLAG_RAW_MODE = 1 << 3,
+
+        /* Disable HW crypto engine */
+        ATH10K_FLAG_HW_CRYPTO_DISABLED = 1 << 4,
+
+        /* Bluetooth coexistance enabled */
+        ATH10K_FLAG_BTCOEX = 1 << 5,
+
+        /* Per Station statistics service */
+        ATH10K_FLAG_PEER_STATS = 1 << 6,
+};
+
 /* 758 */
 struct ath10k {
 	struct ath_common ath_common;
@@ -125,12 +158,16 @@ struct ath10k {
         const struct ath10k_hw_regs *regs;
         const struct ath10k_hw_ce_regs *hw_ce_regs;
         const struct ath10k_hw_values *hw_values;
+	struct ath10k_bmi bmi;
 
 	/* 817 */
         struct {
                 uint32_t vendor;
                 uint32_t device;
         } id;
+
+	/* 868 */
+	atomic_ulong dev_flags;
 
 	/* 887 */
 	/* prevents concurrent FW reconfiguration */
@@ -149,6 +186,9 @@ struct ath10k {
 
 	/* 923 */
 	enum ath10k_state state;
+
+	/* 925 */
+	thrd_t register_work;
 
 	/* 968 */
         struct {
@@ -169,5 +209,8 @@ zx_status_t ath10k_core_create(struct ath10k **ar_ptr, size_t priv_size,
                                   enum ath10k_hw_rev hw_rev,
                                   const struct ath10k_hif_ops *hif_ops);
 void ath10k_core_destroy(struct ath10k *ar);
+
+/* 1024 */
+zx_status_t ath10k_core_register(struct ath10k *ar, uint32_t chip_id);
 
 #endif /* _CORE_H_ */

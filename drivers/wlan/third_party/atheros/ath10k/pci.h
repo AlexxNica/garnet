@@ -30,6 +30,14 @@
  */
 #define DIAG_TRANSFER_LIMIT 2048
 
+/* 33 */
+struct bmi_xfer {
+        bool tx_done;
+        bool rx_done;
+        bool wait_for_resp;
+        uint32_t resp_len;
+};
+
 /* 40 */
 /*
  * PCI-specific Target state
@@ -227,6 +235,10 @@ static inline struct ath10k_pci *ath10k_pci_priv(struct ath10k *ar)
 
 /* 246 */
 #define BAR_NUM 0
+
+/* 263 */
+/* Wait up to this many Ms for a Diagnostic Access CE operation to complete */
+#define DIAG_ACCESS_CE_TIMEOUT_MS 10
 
 /* 266 */
 void ath10k_pci_write32(struct ath10k *ar, uint32_t offset, uint32_t value);

@@ -21,11 +21,11 @@
 #include <ddk/debug.h>
 
 /* Fuchsia */
-// #define ath10k_info(ar, fmt, ...) zxlogf(INFO, "ath10k: " fmt, ##__VA_ARGS__)
-#define ath10k_info(ar, fmt, ...) zxlogf(ERROR, "ath10k: " fmt, ##__VA_ARGS__)
-#define ath10k_err(ar, fmt, ...) zxlogf(ERROR, "ath10k: " fmt, ##__VA_ARGS__)
+// #define ath10k_info(fmt, ...) zxlogf(INFO, "ath10k: " fmt, ##__VA_ARGS__)
+#define ath10k_info(fmt, ...) zxlogf(ERROR, "ath10k: " fmt, ##__VA_ARGS__)
+#define ath10k_err(fmt, ...) zxlogf(ERROR, "ath10k: " fmt, ##__VA_ARGS__)
 /* Fuchsia has no level between ERROR and INFO */
-#define ath10k_warn(ar, fmt, ...) zxlogf(ERROR, "ath10k: " fmt, ##__VA_ARGS__)
+#define ath10k_warn(fmt, ...) zxlogf(ERROR, "ath10k: " fmt, ##__VA_ARGS__)
 
 /* 24 */
 enum ath10k_debug_mask {

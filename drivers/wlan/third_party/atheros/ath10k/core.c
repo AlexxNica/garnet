@@ -15,17 +15,215 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <string.h>
+
+#include <zircon/assert.h>
+
 #include "core.h"
 #include "mac.h"
 // #include "htc.h"
 #include "hif.h"
 // #include "wmi.h"
-// #include "bmi.h"
+#include "bmi.h"
 #include "debug.h"
 // #include "htt.h"
 // #include "testmode.h"
 // #include "wmi-ops.h"
 
+/* 2257 */
+/* mac80211 manages fw/hw initialization through start/stop hooks. However in
+ * order to know what hw capabilities should be advertised to mac80211 it is
+ * necessary to load the firmware (and tear it down immediately since start
+ * hook will try to init it again) before registering
+ */
+static zx_status_t ath10k_core_probe_fw(struct ath10k *ar)
+{
+        struct bmi_target_info target_info;
+        int ret = ZX_OK;
+
+        ret = ath10k_hif_power_up(ar);
+        if (ret) {
+                ath10k_err("could not start pci hif (%d)\n", ret);
+                return ret;
+        }
+
+        memset(&target_info, 0, sizeof(target_info));
+        if (ar->hif.bus == ATH10K_BUS_SDIO)
+		// SDIO unsupported
+                ZX_DEBUG_ASSERT(0);
+        else
+                ret = ath10k_bmi_get_target_info(ar, &target_info);
+        if (ret) {
+                ath10k_err("could not get target info (%d)\n", ret);
+                goto err_power_down;
+        }
+
+#if 0
+        ar->target_version = target_info.version;
+        ar->hw->wiphy->hw_version = target_info.version;
+
+        ret = ath10k_init_hw_params(ar);
+        if (ret) {
+                ath10k_err("could not get hw params (%d)\n", ret);
+                goto err_power_down;
+        }
+
+        ret = ath10k_core_fetch_firmware_files(ar);
+        if (ret) {
+                ath10k_err("could not fetch firmware files (%d)\n", ret);
+                goto err_power_down;
+        }
+
+        BUILD_BUG_ON(sizeof(ar->hw->wiphy->fw_version) !=
+                     sizeof(ar->normal_mode_fw.fw_file.fw_version));
+        memcpy(ar->hw->wiphy->fw_version, ar->normal_mode_fw.fw_file.fw_version,
+               sizeof(ar->hw->wiphy->fw_version));
+
+        ath10k_debug_print_hwfw_info(ar);
+
+        ret = ath10k_core_pre_cal_download(ar);
+        if (ret) {
+                /* pre calibration data download is not necessary
+                 * for all the chipsets. Ignore failures and continue.
+                 */
+                ath10k_dbg(ar, ATH10K_DBG_BOOT,
+                           "could not load pre cal data: %d\n", ret);
+        }
+
+        ret = ath10k_core_get_board_id_from_otp(ar);
+        if (ret && ret != -EOPNOTSUPP) {
+                ath10k_err("failed to get board id from otp: %d\n",
+                           ret);
+                goto err_free_firmware_files;
+        }
+
+        ret = ath10k_core_check_smbios(ar);
+        if (ret)
+                ath10k_dbg(ar, ATH10K_DBG_BOOT, "bdf variant name not set.\n");
+
+        ret = ath10k_core_fetch_board_file(ar);
+        if (ret) {
+                ath10k_err("failed to fetch board file: %d\n", ret);
+                goto err_free_firmware_files;
+        }
+
+        ath10k_debug_print_board_info(ar);
+
+        ret = ath10k_core_init_firmware_features(ar);
+        if (ret) {
+                ath10k_err("fatal problem with firmware features: %d\n",
+                           ret);
+                goto err_free_firmware_files;
+        }
+
+        ret = ath10k_swap_code_seg_init(ar, &ar->normal_mode_fw.fw_file);
+        if (ret) {
+                ath10k_err("failed to initialize code swap segment: %d\n",
+                           ret);
+                goto err_free_firmware_files;
+        }
+
+        mutex_lock(&ar->conf_mutex);
+
+        ret = ath10k_core_start(ar, ATH10K_FIRMWARE_MODE_NORMAL,
+                                &ar->normal_mode_fw);
+        if (ret) {
+                ath10k_err("could not init core (%d)\n", ret);
+                goto err_unlock;
+        }
+
+        ath10k_debug_print_boot_info(ar);
+        ath10k_core_stop(ar);
+
+        mutex_unlock(&ar->conf_mutex);
+
+        ath10k_hif_power_down(ar);
+        return 0;
+
+err_unlock:
+        mutex_unlock(&ar->conf_mutex);
+
+err_free_firmware_files:
+        ath10k_core_free_firmware_files(ar);
+#endif
+
+err_power_down:
+        ath10k_hif_power_down(ar);
+
+        return ret;
+}
+
+/* 2376 */
+static int ath10k_core_register_work(void *thrd_data) {
+	struct ath10k *ar = thrd_data;
+        int status;
+
+        /* peer stats are enabled by default */
+	ar->dev_flags |= ATH10K_FLAG_PEER_STATS;
+
+        status = ath10k_core_probe_fw(ar);
+        if (status) {
+                ath10k_err("could not probe fw (%d)\n", status);
+                goto err;
+        }
+
+#if 0
+        status = ath10k_mac_register(ar);
+        if (status) {
+                ath10k_err("could not register to mac80211 (%d)\n", status);
+                goto err_release_fw;
+        }
+
+        status = ath10k_debug_register(ar);
+        if (status) {
+                ath10k_err("unable to initialize debugfs\n");
+                goto err_unregister_mac;
+        }
+
+        status = ath10k_spectral_create(ar);
+        if (status) {
+                ath10k_err("failed to initialize spectral\n");
+                goto err_debug_destroy;
+        }
+
+        status = ath10k_thermal_register(ar);
+        if (status) {
+                ath10k_err("could not register thermal device: %d\n",
+                           status);
+                goto err_spectral_destroy;
+        }
+
+        set_bit(ATH10K_FLAG_CORE_REGISTERED, &ar->dev_flags);
+        return 0;
+
+err_spectral_destroy:
+        ath10k_spectral_destroy(ar);
+err_debug_destroy:
+        ath10k_debug_destroy(ar);
+err_unregister_mac:
+        ath10k_mac_unregister(ar);
+err_release_fw:
+        ath10k_core_free_firmware_files(ar);
+#endif
+err:
+        /* TODO: It's probably a good idea to release device from the driver
+         * but calling device_release_driver() here will cause a deadlock.
+         */
+	return 1;
+}
+
+/* 2433 */
+zx_status_t ath10k_core_register(struct ath10k *ar, uint32_t chip_id)
+{
+        ar->chip_id = chip_id;
+	thrd_create_with_name(&ar->register_work, ath10k_core_register_work, ar,
+			      "ath10k_core_register_work");
+	thrd_detach(ar->register_work);
+
+        return 0;
+}
+
+/* 2481 */
 zx_status_t ath10k_core_create(struct ath10k **ar_ptr, size_t priv_size,
 				  zx_device_t *dev, enum ath10k_bus bus,
 				  enum ath10k_hw_rev hw_rev,
@@ -74,7 +272,7 @@ zx_status_t ath10k_core_create(struct ath10k **ar_ptr, size_t priv_size,
 		ar->hw_values = &qca4019_values;
 		break;
 	default:
-		ath10k_err(ar, "unsupported core hardware revision %d\n",
+		ath10k_err("unsupported core hardware revision %d\n",
 			   hw_rev);
 		ret = ZX_ERR_NOT_SUPPORTED;
 		goto err_free_mac;

@@ -66,7 +66,7 @@ zx_status_t ath10k_start(struct ath10k* ar)
 
 	ret = ath10k_hif_power_up(ar);
 	if (ret != ZX_OK) {
-		ath10k_err(ar, "Could not init hif: %s\n", zx_status_get_string(ret));
+		ath10k_err("Could not init hif: %s\n", zx_status_get_string(ret));
 		goto err_off;
 	}
 
@@ -74,28 +74,28 @@ zx_status_t ath10k_start(struct ath10k* ar)
 	ret = ath10k_core_start(ar, ATH10K_FIRMWARE_MODE_NORMAL,
 				&ar->normal_mode_fw);
 	if (ret) {
-		ath10k_err(ar, "Could not init core: %d\n", ret);
+		ath10k_err("Could not init core: %d\n", ret);
 		goto err_power_down;
 	}
 
 	param = ar->wmi.pdev_param->pmf_qos;
 	ret = ath10k_wmi_pdev_set_param(ar, param, 1);
 	if (ret) {
-		ath10k_warn(ar, "failed to enable PMF QOS: %d\n", ret);
+		ath10k_warn("failed to enable PMF QOS: %d\n", ret);
 		goto err_core_stop;
 	}
 
 	param = ar->wmi.pdev_param->dynamic_bw;
 	ret = ath10k_wmi_pdev_set_param(ar, param, 1);
 	if (ret) {
-		ath10k_warn(ar, "failed to enable dynamic BW: %d\n", ret);
+		ath10k_warn("failed to enable dynamic BW: %d\n", ret);
 		goto err_core_stop;
 	}
 
 	if (test_bit(WMI_SERVICE_ADAPTIVE_OCS, ar->wmi.svc_map)) {
 		ret = ath10k_wmi_adaptive_qcs(ar, true);
 		if (ret) {
-			ath10k_warn(ar, "failed to enable adaptive qcs: %d\n",
+			ath10k_warn("failed to enable adaptive qcs: %d\n",
 				    ret);
 			goto err_core_stop;
 		}
@@ -105,7 +105,7 @@ zx_status_t ath10k_start(struct ath10k* ar)
 		param = ar->wmi.pdev_param->burst_enable;
 		ret = ath10k_wmi_pdev_set_param(ar, param, 0);
 		if (ret) {
-			ath10k_warn(ar, "failed to disable burst: %d\n", ret);
+			ath10k_warn("failed to disable burst: %d\n", ret);
 			goto err_core_stop;
 		}
 	}
@@ -124,7 +124,7 @@ zx_status_t ath10k_start(struct ath10k* ar)
 	param = ar->wmi.pdev_param->arp_ac_override;
 	ret = ath10k_wmi_pdev_set_param(ar, param, 0);
 	if (ret) {
-		ath10k_warn(ar, "failed to set arp ac override parameter: %d\n",
+		ath10k_warn("failed to set arp ac override parameter: %d\n",
 			    ret);
 		goto err_core_stop;
 	}
@@ -135,7 +135,7 @@ zx_status_t ath10k_start(struct ath10k* ar)
 							  WMI_CCA_DETECT_LEVEL_AUTO,
 							  WMI_CCA_DETECT_MARGIN_AUTO);
 		if (ret) {
-			ath10k_warn(ar, "failed to enable adaptive cca: %d\n",
+			ath10k_warn("failed to enable adaptive cca: %d\n",
 				    ret);
 			goto err_core_stop;
 		}
@@ -144,7 +144,7 @@ zx_status_t ath10k_start(struct ath10k* ar)
 	param = ar->wmi.pdev_param->ani_enable;
 	ret = ath10k_wmi_pdev_set_param(ar, param, 1);
 	if (ret) {
-		ath10k_warn(ar, "failed to enable ani by default: %d\n",
+		ath10k_warn("failed to enable ani by default: %d\n",
 			    ret);
 		goto err_core_stop;
 	}
