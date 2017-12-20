@@ -329,7 +329,7 @@ zx_status_t ath10k_ce_send_nolock(struct ath10k_ce_pipe *ce_state,
 	zx_status_t ret = ZX_OK;
 
 	if (nbytes > ce_state->src_sz_max)
-		ath10k_warn(ar, "%s: send more we can (nbytes: %d, max: %d)\n",
+		ath10k_warn("%s: send more we can (nbytes: %d, max: %d)\n",
 			    __func__, nbytes, ce_state->src_sz_max);
 
 	if (unlikely(CE_RING_DELTA(nentries_mask,
@@ -960,7 +960,7 @@ ath10k_ce_alloc_src_ring(struct ath10k *ar, unsigned int ce_id,
 	 */
 	zx_status_t ret = io_buffer_init_aligned(&src_ring->iobuf,
 						 nentries * sizeof(struct ce_desc),
-// FIXME					 roundup_log2(CE_DESC_RING_ALIGN),
+// FIXME -- zircon does not support		 roundup_log2(CE_DESC_RING_ALIGN),
 						 0,
 						 IO_BUFFER_RW | IO_BUFFER_CONTIG);
 	if (ret != ZX_OK) {
@@ -970,6 +970,9 @@ ath10k_ce_alloc_src_ring(struct ath10k *ar, unsigned int ce_id,
 
 	src_ring->base_addr_owner_space = io_buffer_virt(&src_ring->iobuf);
 	src_ring->base_addr_ce_space = io_buffer_phys(&src_ring->iobuf);
+	ZX_DEBUG_ASSERT(src_ring->base_addr_ce_space < 0x100000000ULL);
+	ZX_DEBUG_ASSERT((((1ULL << roundup_log2(CE_DESC_RING_ALIGN)) - 1)
+			 & src_ring->base_addr_ce_space) == 0);
 
 	*src_ring_ptr = src_ring;
 	return ZX_OK;
@@ -999,7 +1002,7 @@ ath10k_ce_alloc_dest_ring(struct ath10k *ar, unsigned int ce_id,
 	 */
 	zx_status_t ret = io_buffer_init_aligned(&dest_ring->iobuf,
 						 nentries * sizeof(struct ce_desc),
-// FIXME					 roundup_log2(CE_DESC_RING_ALIGN),
+// FIXME - zircon does not support		 roundup_log2(CE_DESC_RING_ALIGN),
 						 0,
 						 IO_BUFFER_RW | IO_BUFFER_CONTIG);
 	if (ret != ZX_OK) {
@@ -1009,6 +1012,9 @@ ath10k_ce_alloc_dest_ring(struct ath10k *ar, unsigned int ce_id,
 
 	dest_ring->base_addr_owner_space = io_buffer_virt(&dest_ring->iobuf);
 	dest_ring->base_addr_ce_space = io_buffer_phys(&dest_ring->iobuf);
+	ZX_DEBUG_ASSERT(dest_ring->base_addr_ce_space < 0x100000000ULL);
+	ZX_DEBUG_ASSERT((((1ULL << roundup_log2(CE_DESC_RING_ALIGN)) - 1)
+			 & dest_ring->base_addr_ce_space) == 0);
 
 	*dest_ring_ptr = dest_ring;
 	return ZX_OK;
@@ -1029,7 +1035,7 @@ int ath10k_ce_init_pipe(struct ath10k *ar, unsigned int ce_id,
 	if (attr->src_nentries) {
 		ret = ath10k_ce_init_src_ring(ar, ce_id, attr);
 		if (ret) {
-			ath10k_err(ar, "Failed to initialize CE src ring for ID: %d (%s)\n",
+			ath10k_err("Failed to initialize CE src ring for ID: %d (%s)\n",
 				   ce_id, zx_status_get_string(ret));
 			return ret;
 		}
@@ -1038,7 +1044,7 @@ int ath10k_ce_init_pipe(struct ath10k *ar, unsigned int ce_id,
 	if (attr->dest_nentries) {
 		ret = ath10k_ce_init_dest_ring(ar, ce_id, attr);
 		if (ret) {
-			ath10k_err(ar, "Failed to initialize CE dest ring for ID: %d (%s)\n",
+			ath10k_err("Failed to initialize CE dest ring for ID: %d (%s)\n",
 				   ce_id, zx_status_get_string(ret));
 			return ret;
 		}
@@ -1107,7 +1113,7 @@ zx_status_t ath10k_ce_alloc_pipe(struct ath10k *ar, int ce_id,
 	if (attr->src_nentries) {
 		ret = ath10k_ce_alloc_src_ring(ar, ce_id, attr, &ce_state->src_ring);
 		if (ret != ZX_OK) {
-			ath10k_err(ar, "failed to allocate copy engine source ring %d: %s\n",
+			ath10k_err("failed to allocate copy engine source ring %d: %s\n",
 				   ce_id, zx_status_get_string(ret));
 			ce_state->src_ring = NULL;
 			return ret;
@@ -1117,7 +1123,7 @@ zx_status_t ath10k_ce_alloc_pipe(struct ath10k *ar, int ce_id,
 	if (attr->dest_nentries) {
 		ret = ath10k_ce_alloc_dest_ring(ar, ce_id, attr, &ce_state->dest_ring);
 		if (ret != ZX_OK) {
-			ath10k_err(ar, "failed to allocate copy engine destination ring %d: %s\n",
+			ath10k_err("failed to allocate copy engine destination ring %d: %s\n",
 				   ce_id, zx_status_get_string(ret));
 			ce_state->dest_ring = NULL;
 			return ret;
@@ -1167,7 +1173,7 @@ void ath10k_ce_dump_registers(struct ath10k *ar,
 
 	SPINLOCK_ASSERT_HELD(&ar->data_lock);
 
-	ath10k_err(ar, "Copy Engine register dump:\n");
+	ath10k_err("Copy Engine register dump:\n");
 
 	pthread_spin_lock(&ar_pci->ce_lock);
 	for (id = 0; id < CE_COUNT; id++) {
@@ -1182,7 +1188,7 @@ void ath10k_ce_dump_registers(struct ath10k *ar,
 		if (crash_data)
 			crash_data->ce_crash_data[id] = ce;
 
-		ath10k_err(ar, "[%02d]: 0x%08x %3u %3u %3u %3u", id,
+		ath10k_err("[%02d]: 0x%08x %3u %3u %3u %3u", id,
 			   ce.base_addr, ce.src_wr_idx, ce.src_r_idx, ce.dst_wr_idx, ce.dst_r_idx);
 	}
 
