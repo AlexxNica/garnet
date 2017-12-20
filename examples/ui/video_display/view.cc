@@ -121,7 +121,8 @@ class BufferHandler {
   }
 
   ~BufferHandler() = default;
-
+  
+  // This function is called when the release fence is signalled
   async_wait_result_t Handler(async_t* async, zx_status_t status,
                               const zx_packet_signal* signal) {
       if (status != ZX_OK) {
@@ -131,7 +132,18 @@ class BufferHandler {
         return ASYNC_WAIT_FINISHED;
       }
 
-      buffer_->Reset();
+  }
+
+ private:
+  Buffer *buffer_;
+  uint32_t index_;
+  BufferNotifier notifier_;
+  async::AutoWait wait_;
+};
+
+
+void PresentBuffer() {
+
 
       auto acq = fidl::Array<zx::event>::New(1);
       auto rel = fidl::Array<zx::event>::New(1);
@@ -148,19 +160,66 @@ class BufferHandler {
 
       buffer_->Signal();
       return ASYNC_WAIT_AGAIN;
+}
+
+
+// When a buffer is released, signal that it is available to the writer
+// In this case, that means directly write to the buffer then re-present it
+void View::BufferReleased(uint32_t  buffer_index) {
+  buffers_[buffer_index]->Reset();
+  // Call Release() to the camera driver, who then fills it
+  // TODO(garratt): for pipelining, should have an idea of who is next...
+  //For now fill the buffer here
+  
+  // Camera driver would then signal:
+  IncomingBufferFilled(buffer_index);
+}
+
+void View::IncomingBufferFilled(uint32_t buffer_index) {
+  
+
+
+
+}
+
+// frame interval:
+// After we produce frames, we get a callback with when the frame was produced
+// and the presentation interval.  The presentation interval is an upper bound
+// on our frame rate, so we mostly just need to make sure that we are
+// presenting at our desired rate, and make sure that we don't fall behind the
+// presentation times being reported
+
+void View::OnFramePresented(const scenic::PresentationInfoPtr& info) {
+  frame_scheduler_.Update(info->presentation_time, info->presentation_interval);
+}
+
+
+// right now, this will just schedule frames as fast as the interval will allow
+class FrameScheduler {
+  uint64_t presentation_interval_ns_ = 33000000;
+  uint64_t last_presentation_time_ns_ = 0;
+  std::deque<uint64_t> requested_presentation_times_;
+ public:
+  // Get the next frame presentation time
+  uint64_t NextFrame() {
+    last_presentation_time_ns_ += presentation_interval_ns_;
+    requested_presentation_times_.push_back(last_presentation_time_ns_);
+    return last_presentation_time_ns_;
   }
 
- private:
-  Buffer *buffer_;
-  uint32_t index_;
-  BufferNotifier notifier_;
-  async::AutoWait wait_;
+  void Update(uint64_t presentation_time, uint64_t presentation_interval) {
+    if (requested_presentation_times_.size() == 0) {
+      return;
+    } // todo: and lots of errors
+    int64_t diff = presentation_time - requested_presentation_times_.pop_front();
+    if (diff > 0) {
+      // we are behind - we need to advance our presentation timing
+      last_presentation_time_ns_ += diff;
+    } // todo error if < 0
+    presentation_interval_ns_ = presentation_interval;
+  }
+
 };
-
-
-
-
-
 
 View::View(app::ApplicationContext* application_context,
            mozart::ViewManagerPtr view_manager,
