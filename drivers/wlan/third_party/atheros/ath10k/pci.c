@@ -1205,9 +1205,7 @@ static zx_status_t ath10k_pci_wake_target_cpu(struct ath10k *ar)
 /* 1966 */
 static int ath10k_pci_get_num_banks(struct ath10k *ar)
 {
-        struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
-
-        switch (ar_pci->device_id) {
+        switch (ar->id.device) {
         case QCA988X_2_0_DEVICE_ID:
         case QCA99X0_2_0_DEVICE_ID:
         case QCA9888_2_0_DEVICE_ID:
@@ -2256,7 +2254,6 @@ static zx_status_t ath10k_pci_probe(void* ctx, zx_device_t* dev)
 	memcpy(&ar_pci->pdev, &pci, sizeof(ar_pci->pdev));
 	ar_pci->dev = dev;
 	ar_pci->ar = ar;
-	ar->dev_id = pci_info.device_id;
 	ar_pci->pci_ps = pci_ps;
 	ar_pci->bus_ops = &ath10k_pci_bus_ops;
 	ar_pci->pci_soft_reset = pci_soft_reset;

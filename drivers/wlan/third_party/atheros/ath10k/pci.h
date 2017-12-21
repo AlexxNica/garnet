@@ -173,8 +173,6 @@ enum ath10k_pci_irq_mode {
 
 /* 165 */
 struct ath10k_pci {
-	/* Fuchsia */
-	uint16_t device_id;
 
 	/* 136 */
         struct ath10k_pci_pipe pipe_info[CE_COUNT_MAX];

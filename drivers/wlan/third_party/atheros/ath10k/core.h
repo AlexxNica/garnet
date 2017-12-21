@@ -144,8 +144,7 @@ struct ath10k {
 	/* 765 */
 	enum ath10k_hw_rev hw_rev;
 
-	/* 766 */
-	uint16_t dev_id;
+	/* 767 */
 	uint32_t chip_id;
 
 	/* 789 */
