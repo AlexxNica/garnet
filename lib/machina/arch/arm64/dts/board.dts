@@ -49,6 +49,8 @@
 
   pclk {
     compatible = "fixed-clock";
+    clock-frequency = <0x16e3600>;
+    clock-output-names = "clk24mhz";
     phandle = <2>;
     #clock-cells = <0>;
   };
