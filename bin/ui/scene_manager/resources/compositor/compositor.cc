@@ -62,16 +62,10 @@ bool Compositor::SetLayerStack(LayerStackPtr layer_stack) {
 // Helper function for DrawLayer().
 static void InitEscherStage(
     escher::Stage* stage,
-    uint32_t width,
-    uint32_t height,
+    const escher::ViewingVolume& viewing_volume,
     const std::vector<AmbientLightPtr>& ambient_lights,
     const std::vector<DirectionalLightPtr>& directional_lights) {
-  // TODO(MZ-194): Define these properties on the Scene instead of hardcoding
-  // them here.
-  constexpr float kTop = 1000;
-  constexpr float kBottom = 0;
-  stage->set_viewing_volume(
-      {static_cast<float>(width), static_cast<float>(height), kTop, kBottom});
+  stage->set_viewing_volume(viewing_volume);
 
   if (ambient_lights.empty()) {
     constexpr float kIntensity = 0.3f;
@@ -115,11 +109,11 @@ static void InitEscherStage(
   }
 }
 
-void Compositor::DrawLayer(escher::PaperRenderer* escher_renderer,
+void Compositor::DrawLayer(const escher::FramePtr& frame,
+                           escher::PaperRenderer* escher_renderer,
                            escher::ShadowMapRenderer* shadow_map_renderer,
                            Layer* layer,
                            const escher::ImagePtr& output_image,
-                           const escher::SemaphorePtr& frame_done_semaphore,
                            const escher::Model* overlay_model) {
   TRACE_DURATION("gfx", "Compositor::DrawLayer");
   FXL_DCHECK(layer->IsDrawable());
@@ -143,8 +137,8 @@ void Compositor::DrawLayer(escher::PaperRenderer* escher_renderer,
   auto& scene = renderer->camera()->scene();
 
   escher::Stage stage;
-  InitEscherStage(&stage, output_image->width(), output_image->height(),
-                  scene->ambient_lights(), scene->directional_lights());
+  InitEscherStage(&stage, layer->GetViewingVolume(), scene->ambient_lights(),
+                  scene->directional_lights());
   escher::Model model(renderer->CreateDisplayList(renderer->camera()->scene(),
                                                   escher::vec2(layer->size())));
   escher::Camera camera =
@@ -161,19 +155,19 @@ void Compositor::DrawLayer(escher::PaperRenderer* escher_renderer,
       break;
     case scenic::ShadowTechnique::MOMENT_SHADOW_MAP:
       FXL_DLOG(WARNING) << "Moment shadow maps not implemented";
-      // fallthrough to regular shadow maps.
+    // Fallthrough to regular shadow maps.
     case scenic::ShadowTechnique::SHADOW_MAP:
       escher_renderer->set_shadow_type(
           escher::PaperRendererShadowType::kShadowMap);
 
       shadow_map = shadow_map_renderer->GenerateDirectionalShadowMap(
-          stage, model, stage.key_light().direction(),
+          frame, stage, model, stage.key_light().direction(),
           stage.key_light().color());
       break;
   }
 
-  escher_renderer->DrawFrame(stage, model, camera, output_image, shadow_map,
-                             overlay_model, frame_done_semaphore, nullptr);
+  escher_renderer->DrawFrame(frame, stage, model, camera, output_image,
+                             shadow_map, overlay_model);
 }
 
 void Compositor::DrawFrame(const FrameTimingsPtr& frame_timings,
@@ -202,8 +196,9 @@ void Compositor::DrawFrame(const FrameTimingsPtr& frame_timings,
   // each layer, which will be composited as part of rendering the final
   // layer.
   std::vector<escher::Object> layer_objects;
-
   layer_objects.reserve(drawable_layers.size() - 1);
+
+  escher::FramePtr frame = escher()->NewFrame("Scenic Compositor");
   auto recycler = escher()->resource_recycler();
   for (size_t i = 1; i < drawable_layers.size(); ++i) {
     auto layer = drawable_layers[i];
@@ -211,9 +206,10 @@ void Compositor::DrawFrame(const FrameTimingsPtr& frame_timings,
         recycler, GetLayerFramebufferImage(layer->width(), layer->height()),
         vk::Filter::eLinear);
 
+    DrawLayer(frame, escher_renderer, shadow_renderer, drawable_layers[i],
+              texture->image(), nullptr);
     auto semaphore = escher::Semaphore::New(escher()->vk_device());
-    DrawLayer(escher_renderer, shadow_renderer, drawable_layers[i],
-              texture->image(), semaphore, nullptr);
+    frame->SubmitPartialFrame(semaphore);
     texture->image()->SetWaitSemaphore(std::move(semaphore));
 
     auto material = escher::Material::New(layer->color(), std::move(texture));
@@ -227,14 +223,15 @@ void Compositor::DrawFrame(const FrameTimingsPtr& frame_timings,
   swapchain_->DrawAndPresentFrame(
       frame_timings,
       [
-        this, escher_renderer, shadow_renderer, layer = drawable_layers[0],
-        overlay = &overlay_model
+        this, frame{std::move(frame)}, escher_renderer, shadow_renderer,
+        layer = drawable_layers[0], overlay = &overlay_model
       ](const escher::ImagePtr& output_image,
         const escher::SemaphorePtr& acquire_semaphore,
         const escher::SemaphorePtr& frame_done_semaphore) {
         output_image->SetWaitSemaphore(acquire_semaphore);
-        DrawLayer(escher_renderer, shadow_renderer, layer, output_image,
-                  frame_done_semaphore, overlay);
+        DrawLayer(frame, escher_renderer, shadow_renderer, layer, output_image,
+                  overlay);
+        frame->EndFrame(frame_done_semaphore, nullptr);
       });
 
   if (FXL_VLOG_IS_ON(3)) {

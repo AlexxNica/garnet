@@ -13,22 +13,19 @@
 
 namespace fidl {
 
-// Message is a holder for the data and handles to be sent over a channel.
-// Message owns its data and handles, but a consumer of Message is free to
-// mutate the data and handles. The message's data is comprised of a header
-// followed by payload.
+// Message represents a Zircon channel message.  It contains the message's
+// data and handles.
+//
+// Message owns the handles and the handle buffer, but it does not own the
+// data buffer.  A consumer of a Message instance is free to mutate the
+// data and handles, but it cannot deallocate or transfer ownership of the
+// data buffer, which is borrowed.
+//
+// The message data consists of a header followed by payload data.
 class Message {
  public:
   Message();
   ~Message();
-
-  void Reset();
-
-  void AllocData(uint32_t num_bytes);
-  void AllocUninitializedData(uint32_t num_bytes);
-
-  // Transfers data and handles to |destination|.
-  void MoveTo(Message* destination);
 
   uint32_t data_num_bytes() const { return data_num_bytes_; }
 
@@ -74,15 +71,58 @@ class Message {
   const std::vector<zx_handle_t>* handles() const { return &handles_; }
   std::vector<zx_handle_t>* mutable_handles() { return &handles_; }
 
- private:
-  void Initialize();
-  void FreeDataAndCloseHandles();
+  void MoveHandlesFrom(Message* source);
 
-  uint32_t data_num_bytes_;
-  internal::MessageData* data_;
+ protected:
+  void CloseHandles();
+
+  uint32_t data_num_bytes_ = 0;
+  internal::MessageData* data_ = nullptr;
   std::vector<zx_handle_t> handles_;
 
+ private:
   FXL_DISALLOW_COPY_AND_ASSIGN(Message);
+};
+
+// AllocMessage is like Message, except that it owns the data buffer.
+//
+// The data buffer will be heap-allocated.  This means that ownership of
+// the buffer can be transferred, using MoveFrom().
+class AllocMessage : public Message {
+ public:
+  AllocMessage();
+  ~AllocMessage();
+
+  void Reset();
+
+  void AllocData(uint32_t num_bytes);
+  void AllocUninitializedData(uint32_t num_bytes);
+  void CopyDataFrom(Message* source);
+
+  // Transfers data and handles from |source|.
+  void MoveFrom(AllocMessage* source);
+
+ private:
+  FXL_DISALLOW_COPY_AND_ASSIGN(AllocMessage);
+};
+
+// PreallocMessage is similar to AllocMessage, except that it uses a
+// preallocated data buffer for messages with small amounts of data.
+//
+// When PreallocMessage is allocated on the stack, the data for a small
+// message will be stack-allocated too.  Larger messages will still be
+// heap-allocated.
+class PreallocMessage : public Message {
+ public:
+  PreallocMessage() {}
+  ~PreallocMessage();
+
+  void AllocUninitializedData(uint32_t num_bytes);
+
+ private:
+  uint8_t prealloc_buf_[128];
+
+  FXL_DISALLOW_COPY_AND_ASSIGN(PreallocMessage);
 };
 
 class MessageReceiver {
@@ -151,7 +191,7 @@ class MessageReceiverWithResponderStatus : public MessageReceiver {
 // and handles).
 //
 // NOTE: The message isn't validated and may be malformed!
-zx_status_t ReadMessage(const zx::channel& channel, Message* message);
+zx_status_t ReadMessage(const zx::channel& channel, PreallocMessage* message);
 
 // Read a single message from the channel and dispatch to the given receiver.
 // |handle| must be valid. |receiver| may be null, in which case the read
@@ -167,7 +207,7 @@ zx_status_t WriteMessage(const zx::channel& channel,
 
 zx_status_t CallMessage(const zx::channel& channel,
                         Message* message,
-                        Message* response);
+                        PreallocMessage* response);
 
 }  // namespace fidl
 

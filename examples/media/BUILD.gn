@@ -14,11 +14,10 @@ package("media") {
     "fx",
     "master_gain",
     "media_client_sine",
-    "media_player",
     "simple_sine",
     "simple_sine_sync",
     "tones",
-    "vu_meter",
+    "tts",
     "wav_record",
   ]
 
@@ -36,9 +35,6 @@ package("media") {
       name = "media_client_sine"
     },
     {
-      name = "media_player"
-    },
-    {
       name = "simple_sine"
     },
     {
@@ -48,7 +44,7 @@ package("media") {
       name = "tones"
     },
     {
-      name = "vu_meter"
+      name = "tts"
     },
     {
       name = "wav_record"

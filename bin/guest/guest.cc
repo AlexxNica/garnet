@@ -11,6 +11,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <fbl/string_buffer.h>
 #include <fbl/unique_fd.h>
 #include <fbl/unique_ptr.h>
 #include <hypervisor/guest.h>
@@ -46,6 +47,7 @@ static const uint64_t kUartBases[kNumUarts] = {
 #include <hypervisor/x86/acpi.h>
 #include <hypervisor/x86/local_apic.h>
 #include "garnet/lib/machina/arch/x86/io_port.h"
+#include "garnet/lib/machina/arch/x86/page_table.h"
 #include "garnet/lib/machina/arch/x86/tpm.h"
 
 static const char kDsdtPath[] = "/pkg/data/dsdt.aml";
@@ -159,25 +161,25 @@ static zx_status_t poll_balloon_stats(machina::VirtioBalloon* balloon,
 }
 
 static const char* zircon_cmdline(const char* cmdline) {
-  static char buf[128];
-  snprintf(buf, sizeof(buf), "TERM=uart %s", cmdline);
-  return buf;
+  static fbl::StringBuffer<LINE_MAX> buffer;
+  buffer.AppendPrintf("TERM=uart %s", cmdline);
+  return buffer.c_str();
 }
 
 static const char* linux_cmdline(const char* cmdline,
                                  uintptr_t uart_addr,
                                  uintptr_t acpi_addr) {
-  static char buf[128];
+  static fbl::StringBuffer<LINE_MAX> buffer;
 #if __aarch64__
-  auto fmt = "earlycon=pl011,%#lx console=ttyS0 %s";
-  snprintf(buf, sizeof(buf), fmt, uart_addr, cmdline);
+  buffer.AppendPrintf("earlycon=pl011,%#lx console=ttyAMA0 console=tty0 %s",
+                      uart_addr, cmdline);
 #elif __x86_64__
-  auto fmt =
-      "earlycon=uart,io,%#lx console=tty0 io_delay=none clocksource=tsc "
-      "acpi_rsdp=%#lx %s";
-  snprintf(buf, sizeof(buf), fmt, uart_addr, acpi_addr, cmdline);
+  buffer.AppendPrintf(
+      "earlycon=uart,io,%#lx console=ttyS0 console=tty0 io_delay=none "
+      "clocksource=tsc acpi_rsdp=%#lx %s",
+      uart_addr, acpi_addr, cmdline);
 #endif
-  return buf;
+  return buffer.c_str();
 }
 
 zx_status_t setup_zircon_framebuffer(
@@ -263,7 +265,7 @@ int main(int argc, char** argv) {
   uintptr_t pt_end_off = 0;
 
 #if __x86_64__
-  status = guest.CreatePageTable(&pt_end_off);
+  status = machina::create_page_table(physmem_addr, physmem_size, &pt_end_off);
   if (status != ZX_OK) {
     fprintf(stderr, "Failed to create page table\n");
     return status;
@@ -361,6 +363,11 @@ int main(int argc, char** argv) {
   }
 
 #if __aarch64__
+  status = interrupt_controller.RegisterVcpu(0, &vcpu);
+  if (status != ZX_OK) {
+    fprintf(stderr, "Failed to register VCPU with GIC distributor\n");
+    return status;
+  }
   machina::Pl031 pl031;
   status = pl031.Init(&guest);
   if (status != ZX_OK) {
@@ -428,9 +435,19 @@ int main(int argc, char** argv) {
       return status;
   }
 
-  // Setup GPU device.
+  // Setup input device.
   machina::InputDispatcher input_dispatcher(kInputQueueDepth);
   machina::HidEventSource hid_event_source(&input_dispatcher);
+  machina::VirtioInput input(&input_dispatcher, physmem_addr, physmem_size,
+                             "machina-input", "serial-number");
+  status = input.Start();
+  if (status != ZX_OK)
+    return status;
+  status = bus.Connect(&input.pci_device(), PCI_DEVICE_VIRTIO_INPUT);
+  if (status != ZX_OK)
+    return status;
+
+  // Setup GPU device.
   machina::VirtioGpu gpu(physmem_addr, physmem_size);
   fbl::unique_ptr<machina::GpuScanout> gpu_scanout;
   status = setup_zircon_framebuffer(&gpu, &gpu_scanout);
@@ -454,15 +471,6 @@ int main(int argc, char** argv) {
   if (status != ZX_OK)
     return status;
   status = bus.Connect(&gpu.pci_device(), PCI_DEVICE_VIRTIO_GPU);
-  if (status != ZX_OK)
-    return status;
-
-  machina::VirtioInput input(&input_dispatcher, physmem_addr, physmem_size,
-                             "machina-input", "serial-number");
-  status = input.Start();
-  if (status != ZX_OK)
-    return status;
-  status = bus.Connect(&input.pci_device(), PCI_DEVICE_VIRTIO_INPUT);
   if (status != ZX_OK)
     return status;
 

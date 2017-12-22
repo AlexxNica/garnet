@@ -73,6 +73,7 @@ class AudioDriver {
 
   State state() const { return state_; }
   uint32_t frames_per_sec() const { return frames_per_sec_; }
+  uint64_t external_delay_nsec() const { return external_delay_nsec_; }
   uint16_t channel_count() const { return channel_count_; }
   audio_sample_format_t sample_format() const { return sample_format_; }
   uint32_t bytes_per_frame() const { return bytes_per_frame_; }
@@ -98,7 +99,7 @@ class AudioDriver {
 
   // Dispatchers for messages received over stream and ring buffer channels.
   zx_status_t ReadMessage(
-      const fbl::RefPtr<::audio::dispatcher::Channel>& channel,
+      const fbl::RefPtr<::dispatcher::Channel>& channel,
       void* buf,
       uint32_t buf_size,
       uint32_t* bytes_read_out,
@@ -186,9 +187,9 @@ class AudioDriver {
   AudioDevice* const owner_;
 
   State state_ = State::Uninitialized;
-  fbl::RefPtr<::audio::dispatcher::Channel> stream_channel_;
-  fbl::RefPtr<::audio::dispatcher::Channel> rb_channel_;
-  fbl::RefPtr<::audio::dispatcher::Timer> cmd_timeout_;
+  fbl::RefPtr<::dispatcher::Channel> stream_channel_;
+  fbl::RefPtr<::dispatcher::Channel> rb_channel_;
+  fbl::RefPtr<::dispatcher::Timer> cmd_timeout_;
   zx_time_t last_set_timeout_ = ZX_TIME_INFINITE;
 
   // State for configured format ranges
@@ -197,6 +198,7 @@ class AudioDriver {
 
   // Configuration state.
   uint32_t frames_per_sec_;
+  uint64_t external_delay_nsec_;
   uint16_t channel_count_;
   audio_sample_format_t sample_format_;
   uint32_t bytes_per_frame_;

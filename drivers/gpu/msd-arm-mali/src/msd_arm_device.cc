@@ -9,6 +9,8 @@
 #include "magma_util/dlog.h"
 #include "magma_util/macros.h"
 #include "magma_vendor_queries.h"
+#include "platform_port.h"
+#include "platform_trace.h"
 #include <bitset>
 #include <cstdio>
 #include <ddk/debug.h>
@@ -65,6 +67,19 @@ protected:
     }
 
     std::shared_ptr<MsdArmAtom> atom_;
+};
+
+class MsdArmDevice::CancelAtomsRequest : public DeviceRequest {
+public:
+    CancelAtomsRequest(std::shared_ptr<MsdArmConnection> connection) : connection_(connection) {}
+
+protected:
+    magma::Status Process(MsdArmDevice* device) override
+    {
+        return device->ProcessCancelAtoms(connection_);
+    }
+
+    std::weak_ptr<MsdArmConnection> connection_;
 };
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -147,8 +162,9 @@ bool MsdArmDevice::Init(void* device_handle)
     magma::log(magma::LOG_INFO, "ARM mali ID %x", gpu_features_.gpu_id.reg_value());
 
     device_request_semaphore_ = magma::PlatformSemaphore::Create();
+    device_port_ = magma::PlatformPort::Create();
 
-    power_manager_ = std::make_unique<PowerManager>();
+    power_manager_ = std::make_unique<PowerManager>(register_io_.get());
 
     scheduler_ = std::make_unique<JobScheduler>(this, 3);
     address_manager_ = std::make_unique<AddressManager>(this, gpu_features_.address_space_count);
@@ -158,7 +174,11 @@ bool MsdArmDevice::Init(void* device_handle)
 
     EnableInterrupts();
 
-    power_manager_->EnableCores(register_io_.get());
+    uint64_t enabled_cores = 1;
+#if defined(MSD_ARM_ENABLE_ALL_CORES)
+    enabled_cores = gpu_features_.shader_present;
+#endif
+    power_manager_->EnableCores(register_io_.get(), enabled_cores);
     return true;
 }
 
@@ -186,6 +206,7 @@ int MsdArmDevice::DeviceThreadLoop()
     DLOG("DeviceThreadLoop starting thread 0x%lx", device_thread_id_->id());
 
     std::unique_lock<std::mutex> lock(device_request_mutex_, std::defer_lock);
+    device_request_semaphore_->WaitAsync(device_port_.get());
 
     while (!device_thread_quit_flag_) {
         auto timeout_duration = scheduler_->GetCurrentTimeoutDuration();
@@ -193,25 +214,34 @@ int MsdArmDevice::DeviceThreadLoop()
             SuspectedGpuHang();
             continue;
         }
+        uint64_t key;
+        magma::Status status(MAGMA_STATUS_OK);
         if (timeout_duration < JobScheduler::Clock::duration::max()) {
             // Add 1 to avoid rounding time down and spinning with timeouts close to 0.
             int64_t millisecond_timeout =
                 std::chrono::duration_cast<std::chrono::milliseconds>(timeout_duration).count() + 1;
-            device_request_semaphore_->Wait(millisecond_timeout);
+            status = device_port_->Wait(&key, millisecond_timeout);
         } else {
-            device_request_semaphore_->Wait();
+            status = device_port_->Wait(&key);
         }
-
-        while (!device_thread_quit_flag_) {
-            lock.lock();
-            if (!device_request_list_.size()) {
-                lock.unlock();
-                break;
+        if (status.ok()) {
+            if (key == device_request_semaphore_->id()) {
+                device_request_semaphore_->Reset();
+                device_request_semaphore_->WaitAsync(device_port_.get());
+                while (!device_thread_quit_flag_) {
+                    lock.lock();
+                    if (!device_request_list_.size()) {
+                        lock.unlock();
+                        break;
+                    }
+                    auto request = std::move(device_request_list_.front());
+                    device_request_list_.pop_front();
+                    lock.unlock();
+                    request->ProcessAndReply(this);
+                }
+            } else {
+                scheduler_->PlatformPortSignaled(key);
             }
-            auto request = std::move(device_request_list_.front());
-            device_request_list_.pop_front();
-            lock.unlock();
-            request->ProcessAndReply(this);
         }
     }
 
@@ -321,6 +351,7 @@ static bool IsHardwareResultCode(uint32_t result)
 
 magma::Status MsdArmDevice::ProcessJobInterrupt()
 {
+    TRACE_DURATION("magma", "MsdArmDevice::ProcessJobInterrupt");
     auto irq_status = registers::JobIrqFlags::GetStatus().ReadFrom(register_io_.get());
     auto clear_flags = registers::JobIrqFlags::GetIrqClear().FromValue(irq_status.reg_value());
     clear_flags.WriteTo(register_io_.get());
@@ -458,6 +489,13 @@ void MsdArmDevice::ScheduleAtom(std::shared_ptr<MsdArmAtom> atom)
     EnqueueDeviceRequest(std::make_unique<ScheduleAtomRequest>(std::move(atom)));
 }
 
+void MsdArmDevice::CancelAtoms(std::shared_ptr<MsdArmConnection> connection)
+{
+    EnqueueDeviceRequest(std::make_unique<CancelAtomsRequest>(connection));
+}
+
+magma::PlatformPort* MsdArmDevice::GetPlatformPort() { return device_port_.get(); }
+
 void MsdArmDevice::DumpRegisters(const GpuFeatures& features, RegisterIo* io, DumpState* dump_state)
 {
     static struct {
@@ -545,8 +583,17 @@ magma::Status MsdArmDevice::ProcessDumpStatusToLog()
 
 magma::Status MsdArmDevice::ProcessScheduleAtom(std::shared_ptr<MsdArmAtom> atom)
 {
+    TRACE_DURATION("magma", "MsdArmDevice::ProcessScheduleAtom");
     scheduler_->EnqueueAtom(std::move(atom));
     scheduler_->TryToSchedule();
+    return MAGMA_STATUS_OK;
+}
+
+magma::Status MsdArmDevice::ProcessCancelAtoms(std::weak_ptr<MsdArmConnection> connection)
+{
+    // It's fine to cancel with an invalid shared_ptr, as that will clear out
+    // atoms for connections that are dead already.
+    scheduler_->CancelAtomsForConnection(connection.lock());
     return MAGMA_STATUS_OK;
 }
 
@@ -579,8 +626,8 @@ void MsdArmDevice::ExecuteAtomOnDevice(MsdArmAtom* atom, RegisterIo* register_io
     config.end_flush_invalidate().set(true);
     config.WriteTo(register_io);
 
-    // Execute on core 0, the only one powered on.
-    slot.AffinityNext().FromValue(1).WriteTo(register_io);
+    // Execute on every powered-on core.
+    slot.AffinityNext().FromValue(power_manager_->shader_ready_status()).WriteTo(register_io);
     slot.CommandNext().FromValue(registers::JobSlotCommand::kCommandStart).WriteTo(register_io);
 }
 

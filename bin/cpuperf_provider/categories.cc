@@ -23,26 +23,34 @@ enum EventId {
 #define DEF_SKL_EVENT(symbol, id, event, umask, flags, name, description) \
   symbol = CPUPERF_MAKE_EVENT_ID(CPUPERF_UNIT_MODEL, id),
 #include <zircon/device/cpu-trace/skylake-pm-events.inc>
+
+#define DEF_MISC_SKL_EVENT(symbol, id, offset, size, flags, name, description) \
+  symbol = CPUPERF_MAKE_EVENT_ID(CPUPERF_UNIT_MISC, id),
+#include <zircon/device/cpu-trace/skylake-misc-events.inc>
 };
 
-#define DEF_FIXED_CATEGORY(symbol, id, name, counters...) \
-  static const cpuperf_event_id_t symbol ## _events[] = { counters };
-#define DEF_ARCH_CATEGORY(symbol, id, name, counters...) \
-  static const cpuperf_event_id_t symbol ## _events[] = { counters };
+#define DEF_FIXED_CATEGORY(symbol, name, events...) \
+  static const cpuperf_event_id_t symbol ## _events[] = { events };
+#define DEF_ARCH_CATEGORY(symbol, name, events...) \
+  static const cpuperf_event_id_t symbol ## _events[] = { events };
 #include "intel-pm-categories.inc"
 
-#define DEF_SKL_CATEGORY(symbol, id, name, counters...) \
-  static const cpuperf_event_id_t symbol ## _events[] = { counters };
+#define DEF_SKL_CATEGORY(symbol, name, events...) \
+  static const cpuperf_event_id_t symbol ## _events[] = { events };
 #include "skylake-pm-categories.inc"
+
+#define DEF_MISC_SKL_CATEGORY(symbol, name, events...) \
+  static const cpuperf_event_id_t symbol ## _events[] = { events };
+#include "skylake-misc-categories.inc"
 
 static const CategorySpec kCategories[] = {
   // Options
   { "cpu:os",   CategoryGroup::kOption,
-    static_cast<CategoryId>(TraceOption::kOs), 0, nullptr },
+    static_cast<CategoryValue>(TraceOption::kOs), 0, nullptr },
   { "cpu:user", CategoryGroup::kOption,
-    static_cast<CategoryId>(TraceOption::kUser), 0, nullptr },
+    static_cast<CategoryValue>(TraceOption::kUser), 0, nullptr },
   { "cpu:pc",   CategoryGroup::kOption,
-    static_cast<CategoryId>(TraceOption::kPc), 0, nullptr },
+    static_cast<CategoryValue>(TraceOption::kPc), 0, nullptr },
 
   // Sampling rates.
   // Only one of the following is allowed.
@@ -60,23 +68,38 @@ static const CategorySpec kCategories[] = {
   DEF_SAMPLE("sample:1000000", 1000000),
 #undef DEF_SAMPLE
 
+  // TODO(dje): Reorganize fixed,arch,skl(model),misc vs
+  // fixed/programmable+arch/model.
+
   // Fixed events.
-#define DEF_FIXED_CATEGORY(symbol, id, name, counters...) \
-  { "cpu:" name, CategoryGroup::kFixed, id, \
+#define DEF_FIXED_CATEGORY(symbol, name, events...) \
+  { "cpu:" name, CategoryGroup::kFixedArch, 0, \
     countof(symbol ## _events), &symbol ## _events[0] },
 #include "intel-pm-categories.inc"
 
   // Architecturally specified programmable events.
-#define DEF_ARCH_CATEGORY(symbol, id, name, counters...) \
-  { "cpu:" name, CategoryGroup::kArch, id, \
+#define DEF_ARCH_CATEGORY(symbol, name, events...) \
+  { "cpu:" name, CategoryGroup::kProgrammableArch, 0, \
     countof(symbol ## _events), &symbol ## _events[0] },
 #include "intel-pm-categories.inc"
 
+  // Model-specific misc events
+#define DEF_MISC_SKL_CATEGORY(symbol, name, events...) \
+  { "cpu:" name, CategoryGroup::kFixedModel, 0, \
+    countof(symbol ## _events), &symbol ## _events[0] },
+#include "skylake-misc-categories.inc"
+
   // Model-specific programmable events.
-#define DEF_SKL_CATEGORY(symbol, id, name, counters...) \
-  { "cpu:" name, CategoryGroup::kModel, id, \
+#define DEF_SKL_CATEGORY(symbol, name, events...) \
+  { "cpu:" name, CategoryGroup::kProgrammableModel, 0, \
     countof(symbol ## _events), &symbol ## _events[0] },
 #include "skylake-pm-categories.inc"
+};
+
+static const TimebaseSpec kTimebaseCategories[] = {
+#define DEF_TIMEBASE_CATEGORY(symbol, name, event) \
+  { "cpu:" name, event },
+#include "intel-timebase-categories.inc"
 };
 
 
@@ -86,15 +109,14 @@ void TraceConfig::Reset() {
   trace_user_ = false;
   trace_pc_ = false;
   sample_rate_ = 0;
+  timebase_event_ = CPUPERF_EVENT_ID_NONE;
   selected_categories_.clear();
 }
 
-void TraceConfig::Update() {
-  Reset();
-
+bool TraceConfig::ProcessCategories() {
   // The default, if the user doesn't specify any categories, is that every
   // trace category is enabled. This doesn't work for us as the h/w doesn't
-  // support enabling all counters at once. And event when multiplexing support
+  // support enabling all events at once. And event when multiplexing support
   // is added it may not support multiplexing everything. So watch for the
   // default case, which we have to explicitly do as the only API we have is
   // trace_is_category_enabled(), and if present apply our own default.
@@ -108,7 +130,7 @@ void TraceConfig::Update() {
   // Our default is to not trace anything: This is fairly specialized tracing
   // so we only provide it if the user explicitly requests it.
   if (is_default_case)
-    return;
+    return false;
 
   bool have_something = false;
   bool have_sample_rate = false;
@@ -119,7 +141,7 @@ void TraceConfig::Update() {
       FXL_VLOG(1) << "Category " << cat.name << " enabled";
       switch (cat.group) {
         case CategoryGroup::kOption:
-          switch (static_cast<TraceOption>(cat.id)) {
+          switch (static_cast<TraceOption>(cat.value)) {
             case TraceOption::kOs:
               trace_os_ = true;
               break;
@@ -134,20 +156,22 @@ void TraceConfig::Update() {
         case CategoryGroup::kSample:
           if (have_sample_rate) {
             FXL_LOG(ERROR) << "Only one sampling mode at a time is currenty supported";
-            return;
+            return false;
           }
           have_sample_rate = true;
-          sample_rate_ = cat.id;
+          sample_rate_ = cat.value;
           break;
-        case CategoryGroup::kFixed:
+        case CategoryGroup::kFixedArch:
+        case CategoryGroup::kFixedModel:
           selected_categories_.insert(&cat);
           have_something = true;
           break;
-        case CategoryGroup::kArch:
-        case CategoryGroup::kModel:
+        case CategoryGroup::kProgrammableArch:
+        case CategoryGroup::kProgrammableModel:
           if (have_programmable_category) {
+            // TODO(dje): Temporary limitation.
             FXL_LOG(ERROR) << "Only one programmable category at a time is currenty supported";
-            return;
+            return false;
           }
           have_programmable_category = true;
           have_something = true;
@@ -164,6 +188,39 @@ void TraceConfig::Update() {
   }
 
   is_enabled_ = have_something;
+  return true;
+}
+
+bool TraceConfig::ProcessTimebase() {
+  for (const auto& cat : kTimebaseCategories) {
+    if (trace_is_category_enabled(cat.name)) {
+      FXL_VLOG(1) << "Category " << cat.name << " enabled";
+      if (timebase_event_ != CPUPERF_EVENT_ID_NONE) {
+        FXL_LOG(ERROR) << "Timebase already specified";
+        return false;
+      }
+      if (sample_rate_ == 0) {
+        FXL_LOG(ERROR) << "Timebase cannot be used in tally mode";
+        return false;
+      }
+      timebase_event_ = cat.event;
+    }
+  }
+
+  return true;
+}
+
+void TraceConfig::Update() {
+  Reset();
+
+  if (ProcessCategories()) {
+    if (ProcessTimebase()) {
+      return;
+    }
+  }
+
+  // Some error occurred while parsing the selected categories.
+  Reset();
 }
 
 bool TraceConfig::Changed(const TraceConfig& old) const {
@@ -177,6 +234,8 @@ bool TraceConfig::Changed(const TraceConfig& old) const {
     return true;
   if (sample_rate_ != old.sample_rate_)
     return true;
+  if (timebase_event_ != old.timebase_event_)
+    return true;
   if (selected_categories_ != old.selected_categories_)
     return true;
   return false;
@@ -188,50 +247,67 @@ bool TraceConfig::TranslateToDeviceConfig(cpuperf_config_t* out_config) const {
 
   unsigned ctr = 0;
 
+  // If a timebase is requested, it is the first event.
+  if (timebase_event_ != CPUPERF_EVENT_ID_NONE) {
+    const cpuperf::EventDetails* details;
+    FXL_CHECK(cpuperf::EventIdToEventDetails(timebase_event_, &details));
+    FXL_VLOG(2) << fxl::StringPrintf("Using timebase %s", details->name);
+    cfg->events[ctr++] = timebase_event_;
+  }
+
   for (const auto& cat : selected_categories_) {
+    const char* group_name;
     switch (cat->group) {
-      case CategoryGroup::kFixed:
-        if (ctr < countof(cfg->counters)) {
-          FXL_VLOG(2) << fxl::StringPrintf("Adding fixed event id %u to trace",
-                                           cat->id);
-          cfg->counters[ctr++] = cpuperf::GetFixedCounterId(cat->id);
-        } else {
-          FXL_LOG(ERROR) << "Maximum number of counters exceeded";
-          return false;
-        }
+      case CategoryGroup::kFixedArch:
+        group_name = "fixed-arch";
         break;
-      case CategoryGroup::kArch:
-      case CategoryGroup::kModel:
-        for (size_t i = 0; i < cat->count; ++i) {
-          if (ctr < countof(cfg->counters)) {
-            const char* group =
-              cat->group == CategoryGroup::kArch ? "arch" : "model";
-            FXL_VLOG(2) << fxl::StringPrintf("Adding %s event id %u to trace",
-                                             group, cat->id);
-            cfg->counters[ctr++] = cat->events[i];
-          } else {
-            FXL_LOG(ERROR) << "Maximum number of counters exceeded";
-            return false;
-          }
-        }
+      case CategoryGroup::kFixedModel:
+        group_name = "fixed-model";
+        break;
+      case CategoryGroup::kProgrammableArch:
+        group_name = "programmable-arch";
+        break;
+      case CategoryGroup::kProgrammableModel:
+        group_name = "programmable-model";
         break;
       default:
         FXL_NOTREACHED();
     }
+    for (size_t i = 0; i < cat->count; ++i) {
+      if (ctr < countof(cfg->events)) {
+        cpuperf_event_id_t id = cat->events[i];
+        FXL_VLOG(2) << fxl::StringPrintf("Adding %s event id %u to trace",
+                                         group_name, id);
+        cfg->events[ctr++] = id;
+      } else {
+        FXL_LOG(ERROR) << "Maximum number of events exceeded";
+        return false;
+      }
+    }
   }
-  unsigned num_used_counters = ctr;
+  unsigned num_used_events = ctr;
 
   uint32_t flags = 0;
   if (trace_os_)
     flags |= CPUPERF_CONFIG_FLAG_OS;
   if (trace_user_)
     flags |= CPUPERF_CONFIG_FLAG_USER;
-  if (trace_pc_)
-    flags |= CPUPERF_CONFIG_FLAG_PC;
+  if (timebase_event_ == CPUPERF_EVENT_ID_NONE) {
+    // These can only be set for events that are their own timebase.
+    if (trace_pc_)
+      flags |= CPUPERF_CONFIG_FLAG_PC;
+  }
+  if (timebase_event_ != CPUPERF_EVENT_ID_NONE)
+    flags |= CPUPERF_CONFIG_FLAG_TIMEBASE0;
 
-  for (unsigned i = 0; i < num_used_counters; ++i) {
+  for (unsigned i = 0; i < num_used_events; ++i) {
     cfg->rate[i] = sample_rate_;
     cfg->flags[i] = flags;
+  }
+
+  if (timebase_event_ != CPUPERF_EVENT_ID_NONE) {
+    if (trace_pc_)
+      cfg->flags[0] |= CPUPERF_CONFIG_FLAG_PC;
   }
 
   return true;
@@ -242,6 +318,13 @@ std::string TraceConfig::ToString() const {
 
   if (!is_enabled_)
     return "disabled";
+
+  if (timebase_event_ != CPUPERF_EVENT_ID_NONE) {
+    const cpuperf::EventDetails* details;
+    FXL_CHECK(cpuperf::EventIdToEventDetails(timebase_event_, &details));
+    result += fxl::StringPrintf("Timebase 0x%x(%s)",
+                                timebase_event_, details->name);
+  }
 
   if (sample_rate_ > 0) {
     result += fxl::StringPrintf("@%u", sample_rate_);

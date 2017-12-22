@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<manifest>
-  <projects>
-    <project name="external/skia.googlesource.com/skia"
-             path="third_party/skia"
-             remote="https://skia.googlesource.com/skia"
-             revision="61efab3e4ee4205863c60bcc95653d60e1257318"/>
-  </projects>
-</manifest>

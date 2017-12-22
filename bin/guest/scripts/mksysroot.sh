@@ -10,18 +10,6 @@ set -eo pipefail
 
 GUEST_SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-# Where the toybox sources are expected to be.
-TOYBOX_SRC_DIR="/tmp/toybox"
-
-# Toybox initrd file.
-TOYBOX_INITRD="$TOYBOX_SRC_DIR/initrd.gz"
-
-# Toybox root filesystem image.
-TOYBOX_ROOTFS="$TOYBOX_SRC_DIR/rootfs.ext2"
-
-# Where to prep the toybox directory structure.
-TOYBOX_SYSROOT="$TOYBOX_SRC_DIR/fs"
-
 # Where the dash sources are expected to be.
 DASH_SRC_DIR="/tmp/dash"
 
@@ -85,6 +73,7 @@ build_dash() {
   pushd $dash_src
   ./autogen.sh
   ./configure CC="${CROSS_COMPILE}gcc" LDFLAGS="-static" --host=arm64-linux-gnueabi
+  make clean  # Required for rebuilds that change arch.
   make -j100
   popd
 
@@ -94,18 +83,16 @@ build_dash() {
 
 # Generate a simple init script at /init in the target sysroot.
 #
-# $1 - Toybox source directory.
-# $2 - Toybox sysroot directory.
+# $1 - Toybox sysroot directory.
 generate_init() {
-  local toybox_src="$1"
-  local sysroot_dir="$2"
+  local sysroot_dir="$1"
 
   # Write an init script for toybox.
   cat > "$sysroot_dir/init" <<'_EOF'
 #!/bin/sh
 mount -t proc none /proc
 mount -t sysfs none /sys
-echo Launched toybox
+echo Launched sysroot
 exec /bin/sh
 _EOF
 
@@ -119,9 +106,10 @@ _EOF
 package_initrd() {
   local sysroot="$1"
   local initrd="$2"
-  (cd "$sysroot" && find . -print0 \
-    | cpio --null -o --format=newc \
-    | gzip -9 > $initrd)
+
+  pushd "${sysroot}"
+  find . | cpio -oH newc | gzip -9 > "${initrd}"
+  popd
 }
 
 # e2tools provides utilities for manipulating EXT2 filesystems.
@@ -189,6 +177,18 @@ x86)
   usage;;
 esac
 
+# Where the toybox sources are expected to be.
+TOYBOX_SRC_DIR="${TOYBOX_SRC_DIR:-/tmp/toybox-${ARCH}}"
+
+# Toybox initrd file.
+TOYBOX_INITRD="$TOYBOX_SRC_DIR/initrd.gz"
+
+# Toybox root filesystem image.
+TOYBOX_ROOTFS="$TOYBOX_SRC_DIR/rootfs.ext2"
+
+# Where to prep the toybox directory structure.
+TOYBOX_SYSROOT="$TOYBOX_SRC_DIR/fs"
+
 # Do we have something to build?
 if [[ ! "${BUILD_INITRD}" = "true" ]] && [[ ! "${BUILD_ROOTFS}" = "true" ]]; then
   echo "Either -r or -i is required."
@@ -223,7 +223,7 @@ get_dash_source "${DASH_SRC_DIR}"
 
 build_dash "${DASH_SRC_DIR}" "${TOYBOX_SYSROOT}"
 
-generate_init "${TOYBOX_SRC_DIR}" "${TOYBOX_SYSROOT}"
+generate_init "${TOYBOX_SYSROOT}"
 
 if [[ "${BUILD_INITRD}" = "true" ]]; then
   package_initrd "${TOYBOX_SYSROOT}" "${TOYBOX_INITRD}"
