@@ -26,10 +26,12 @@
 #include <ddk/device.h>
 
 #include "linuxisms.h"
-// #include "htt.h"
+#include "htt.h"
 #include "hw.h"
 #include "targaddrs.h"
+#include "wmi.h"
 #include "../ath.h"
+#include "wow.h"
 
 /* 41 */
 #define MS(_v, _f) (((_v) & _f##_MASK) >> _f##_LSB)
@@ -67,6 +69,12 @@ static inline uint32_t host_interest_item_address(uint32_t item_offset)
 /* 154 */
 struct ath10k_bmi {
         bool done_sent;
+};
+
+/* 165 */
+struct ath10k_wmi {
+	uint32_t rx_decap_mode;
+	uint8_t svc_map[WMI_SERVICE_MAX];	// TODO - convert to a proper multi-word bitfield
 };
 
 /* 443 */
@@ -121,6 +129,15 @@ enum ath10k_state {
 
 	/* factory tests */
 	ATH10K_STATE_UTF,
+};
+
+/* 523 */
+enum ath10k_firmware_mode {
+        /* the default mode, standard 802.11 functionality */
+        ATH10K_FIRMWARE_MODE_NORMAL,
+
+        /* factory tests etc */
+        ATH10K_FIRMWARE_MODE_UTF,
 };
 
 /* 531 */
@@ -244,6 +261,14 @@ enum ath10k_cal_mode {
         ATH10K_CAL_MODE_EEPROM,
 };
 
+/* 651 */
+enum ath10k_crypt_mode {
+        /* Only use hardware crypto engine */
+        ATH10K_CRYPT_MODE_HW,
+        /* Only use software crypto engine */
+        ATH10K_CRYPT_MODE_SW,
+};
+
 /* 658 */
 static inline const char *ath10k_cal_mode_str(enum ath10k_cal_mode mode)
 {
@@ -301,6 +326,10 @@ struct ath10k_fw_file {
 
 /* 735 */
 struct ath10k_fw_components {
+	struct ath10k_firmware board;
+	const void *board_data;
+	size_t board_len;
+
         struct ath10k_fw_file fw_file;
 };
 
@@ -317,6 +346,8 @@ struct ath10k {
 	uint16_t dev_id;
 	uint32_t chip_id;
 	uint32_t target_version;
+	uint32_t fw_stats_req_mask;
+	uint32_t max_spatial_stream;
 
 	/* 789 */
         struct {
@@ -329,6 +360,8 @@ struct ath10k {
         const struct ath10k_hw_ce_regs *hw_ce_regs;
         const struct ath10k_hw_values *hw_values;
 	struct ath10k_bmi bmi;
+	struct ath10k_wmi wmi;
+	struct ath10k_htt htt;
 
 	/* 804 */
 	struct ath10k_hw_params hw_params;
@@ -344,6 +377,8 @@ struct ath10k {
         struct {
                 uint32_t vendor;
                 uint32_t device;
+		uint32_t subsystem_vendor;
+		uint32_t subsystem_device;
 
 		bool bmi_ids_valid;
 		uint8_t bmi_board_id;
@@ -352,8 +387,7 @@ struct ath10k {
 
 	/* 830 */
 	int fw_api;
-
-	/* 832 */
+	int bd_api;
 	enum ath10k_cal_mode cal_mode;
 
 	/* 868 */
@@ -374,6 +408,14 @@ struct ath10k {
 	/* 897 */
 	list_node_t peers;
 
+	/* 905 */
+	int max_num_peers;
+	int max_num_stations;
+	int max_num_vdevs;
+	int max_num_tdls_vdevs;
+	int num_active_peers;
+	int num_tids;
+
 	/* 923 */
 	enum ath10k_state state;
 
@@ -388,10 +430,24 @@ struct ath10k {
                 uint32_t fw_cold_reset_counter;
         } stats;
 
+	/* 976 */
+	struct ath10k_wow wow;
+
 	/* 996 */
         /* must be last */
         void* drv_priv;
 };
+
+/* 1000 */
+static inline bool ath10k_peer_stats_enabled(struct ath10k *ar)
+{
+	if ((ar->dev_flags & ATH10K_FLAG_PEER_STATS) && 
+	    ar->wmi.svc_map[WMI_SERVICE_PEER_STATS]) {
+                return true;
+	}
+
+        return false;
+}
 
 /* 1009 */
 zx_status_t ath10k_core_create(struct ath10k **ar_ptr, size_t priv_size,
