@@ -200,4 +200,43 @@ struct bmi_target_info {
 zx_status_t ath10k_bmi_get_target_info(struct ath10k *ar,
                                        struct bmi_target_info *target_info);
 
+/* 205 */
+zx_status_t ath10k_bmi_read_memory(struct ath10k *ar, uint32_t address,
+                                   void *buffer, uint32_t length);
+zx_status_t ath10k_bmi_write_memory(struct ath10k *ar, uint32_t address,
+                                    const void *buffer, uint32_t length);
+
+/* 210 */
+#define ath10k_bmi_read32(ar, item, val)                                     \
+        ({                                                                   \
+                zx_status_t ret;                                             \
+                uint32_t addr;                                               \
+                uint32_t tmp;                                                \
+                                                                             \
+                addr = host_interest_item_address(HI_ITEM(item));            \
+                ret = ath10k_bmi_read_memory(ar, addr, (uint8_t *)&tmp, 4);  \
+                if (ret == ZX_OK)                                            \
+                        *val = tmp;                                          \
+                ret;                                                         \
+         })
+
+#define ath10k_bmi_write32(ar, item, val)                                    \
+        ({                                                                   \
+                zx_status_t ret;                                             \
+                uint32_t address;                                            \
+                uint32_t v = val;                                            \
+                                                                             \
+                address = host_interest_item_address(HI_ITEM(item));         \
+                ret = ath10k_bmi_write_memory(ar, address,                   \
+                                              (uint8_t *)&v, sizeof(v));     \
+                ret;                                                         \
+        })
+
+/* 235 */
+zx_status_t ath10k_bmi_execute(struct ath10k *ar, uint32_t address, uint32_t param,
+			       uint32_t *result);
+zx_status_t ath10k_bmi_lz_stream_start(struct ath10k *ar, uint32_t address);
+zx_status_t ath10k_bmi_lz_data(struct ath10k *ar, const void *buffer, uint32_t length);
+zx_status_t ath10k_bmi_fast_download(struct ath10k *ar, uint32_t address,
+	                             const void *buffer, uint32_t length);
 #endif /* _BMI_H_ */

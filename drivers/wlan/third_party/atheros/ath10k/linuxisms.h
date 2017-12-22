@@ -64,6 +64,7 @@
 
 #define __packed __attribute__((packed))
 
+#define rounddown(n,m) ((n) - ((n) % (m)))
 #define roundup(n,m) (((n) % (m) == 0) ? (n) : (n) + ((m) - ((n) % (m))))
 
 #define roundup_pow_of_two(val) \

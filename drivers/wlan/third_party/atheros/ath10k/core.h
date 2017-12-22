@@ -236,6 +236,31 @@ enum ath10k_dev_flags {
         ATH10K_FLAG_PEER_STATS = 1 << 6,
 };
 
+/* 642 */
+enum ath10k_cal_mode {
+        ATH10K_CAL_MODE_FILE,
+        ATH10K_CAL_MODE_OTP,
+        ATH10K_PRE_CAL_MODE_FILE,
+        ATH10K_CAL_MODE_EEPROM,
+};
+
+/* 658 */
+static inline const char *ath10k_cal_mode_str(enum ath10k_cal_mode mode)
+{
+        switch (mode) {
+        case ATH10K_CAL_MODE_FILE:
+                return "file";
+        case ATH10K_CAL_MODE_OTP:
+                return "otp";
+        case ATH10K_PRE_CAL_MODE_FILE:
+                return "pre-cal-file";
+        case ATH10K_CAL_MODE_EEPROM:
+                return "eeprom";
+        }
+
+        return "unknown";
+}
+
 /* Fuchsia */
 struct ath10k_firmware {
 	zx_handle_t vmo;
@@ -319,10 +344,17 @@ struct ath10k {
         struct {
                 uint32_t vendor;
                 uint32_t device;
+
+		bool bmi_ids_valid;
+		uint8_t bmi_board_id;
+		uint8_t bmi_chip_id;
         } id;
 
 	/* 830 */
 	int fw_api;
+
+	/* 832 */
+	enum ath10k_cal_mode cal_mode;
 
 	/* 868 */
 	atomic_ulong dev_flags;
