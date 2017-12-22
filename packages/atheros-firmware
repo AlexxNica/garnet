@@ -1,0 +1,5 @@
+{
+    "packages": {
+        "atheros-firmware": "//garnet/drivers/wlan/third_party/atheros/ath10k/firmware:atheros-firmware"
+    }
+}

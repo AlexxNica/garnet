@@ -30,6 +30,7 @@ driver_module("ath10k_driver") {
 
   deps = [
     "//garnet/drivers/wlan/common",
+    "//garnet/drivers/wlan/third_party/atheros/ath10k/firmware:atheros-firmware",
     "//zircon/system/ulib/ddktl",
     "//zircon/system/ulib/fbl",
     "//zircon/system/ulib/zx",
@@ -43,8 +44,6 @@ driver_module("ath10k_driver") {
   configs += [ "//build/config/fuchsia:enable_zircon_asserts" ]
 }
 
-# TODO(tkilbourn): copy firmware
-
 package("ath10k") {
   system_image = true
 
@@ -55,6 +54,4 @@ package("ath10k") {
   drivers = [ {
         name = "ath10k.so"
       } ]
-
-  # TODO(tkilbourn): firmware
 }

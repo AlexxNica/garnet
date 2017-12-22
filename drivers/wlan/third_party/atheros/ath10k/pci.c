@@ -2254,6 +2254,7 @@ static zx_status_t ath10k_pci_probe(void* ctx, zx_device_t* dev)
 	memcpy(&ar_pci->pdev, &pci, sizeof(ar_pci->pdev));
 	ar_pci->dev = dev;
 	ar_pci->ar = ar;
+	ar->dev_id = pci_info.device_id;
 	ar_pci->pci_ps = pci_ps;
 	ar_pci->bus_ops = &ath10k_pci_bus_ops;
 	ar_pci->pci_soft_reset = pci_soft_reset;
