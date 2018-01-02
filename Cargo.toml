@@ -16,6 +16,7 @@ members =  [
   "public/rust/fidl_crates/garnet_public_lib_app_fidl_service_provider",
   "public/rust/fidl_crates/garnet_public_lib_device_settings_fidl",
   "public/rust/fidl_crates/garnet_public_lib_fsl_fidl",
+  "public/rust/fidl_crates/garnet_public_lib_network_fidl",
 ]
 
 [patch.crates-io]
@@ -29,7 +30,7 @@ garnet_public_lib_app_fidl = { path = "public/rust/fidl_crates/garnet_public_lib
 garnet_public_lib_app_fidl_service_provider = { path = "public/rust/fidl_crates/garnet_public_lib_app_fidl_service_provider" }
 garnet_public_lib_device_settings_fidl = { path = "public/rust/fidl_crates/garnet_public_lib_device_settings_fidl" }
 garnet_public_lib_fsl_fidl = { path = "public/rust/fidl_crates/garnet_public_lib_fsl_fidl" }
-garnet_public_lib_network_fidl = { path = "public/rust/fidl_crates/garnet_public/lib_network_fidl" }
+garnet_public_lib_network_fidl = { path = "public/rust/fidl_crates/garnet_public_lib_network_fidl" }
 mio = { path = "../third_party/rust-mirrors/mio" }
 mxruntime = { path = "public/rust/crates/mxruntime" }
 mxruntime-sys = { path = "public/rust/crates/mxruntime/mxruntime-sys" }
