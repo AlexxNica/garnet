@@ -16,6 +16,7 @@ struct Buffer {
   void Fill(uint8_t r, uint8_t g, uint8_t b);
 
   void Reset();
+  void Reserve();
   void Signal();
 
   const zx::event& acqure_fence() { return acquire_fence_; }
@@ -34,6 +35,13 @@ struct Buffer {
   }
 
   static Buffer *NewBuffer(uint32_t width, uint32_t height, zx::vmo &main_buffer, uint64_t offset);
+
+  IsReserved() { 
+    // TODO: make sure this actually works, and doesn't just always throw the
+    // timeout...
+    return ZX_ERR_TIMED_OUT == acquire_fence_.wait_one(ZX_EVENT_SIGNALED, 0, 
+                                                       NULL);
+  }
 
  private:
   Buffer() {};

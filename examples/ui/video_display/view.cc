@@ -131,7 +131,8 @@ class BufferHandler {
         wait_.Cancel();
         return ASYNC_WAIT_FINISHED;
       }
-
+      notifier_(index_);
+      return ASYNC_WAIT_AGAIN;
   }
 
  private:
@@ -150,8 +151,9 @@ void PresentBuffer() {
       buffer_->dupAcquireFence(&acq.front());
       buffer_->dupReleaseFence(&rel.front());
 
-      image_pipe->PresentImage(index_, 0, std::move(acq), std::move(rel),
-                               [](scenic::PresentationInfoPtr info) {});
+      image_pipe->PresentImage(index_, pres_time, std::move(acq),
+                               std::move(rel),
+                               fbl::BindMember(this, &BufferHandler::Handler));
 
       uint8_t r, g, b;
       hsv_color(hsv_index, &r, &g, &b);
@@ -161,6 +163,14 @@ void PresentBuffer() {
       buffer_->Signal();
       return ASYNC_WAIT_AGAIN;
 }
+
+
+// Buffer fences and writing states:
+// Acq | Rel | State
+//  0  |  0  |  
+//  0  |  1  |  The buffer is reserved for writing
+//  1  |  0  |  The buffer is being read by the renderer
+//  1  |  1  |  The buffer is available for whatever
 
 
 // When a buffer is released, signal that it is available to the writer
@@ -175,10 +185,52 @@ void View::BufferReleased(uint32_t  buffer_index) {
   IncomingBufferFilled(buffer_index);
 }
 
-void View::IncomingBufferFilled(uint32_t buffer_index) {
+
+// We allow the incoming stream to reserve a a write lock on a buffer
+// it is writing to.  Reserving this buffer signals that it will be the latest
+// buffer to be displayed. In other words, no buffer locked after this buffer
+// will be displayed before this buffer.
+// If the incoming buffer already filled, the driver could just call 
+// IncomingBufferFilled(), which will make sure the buffer is reserved first.
+void View::ReserveIncomingBuffer(uint32_t buffer_index) {
+  if (buffer_index >= kNumFramebuffers) {
+    return; //TODO: error
+  }
+  // todo: check that no fences are set
+  if (frame_buffers_[buffer_index].IsReserved()) {
+    return; //todo: Error
+  }
+  // TODO(garratt): check that we are presenting stuff
+  uint64_t pres_time = frame_scheduler_.GetNextPresentationTime();
   
+  auto acq = fidl::Array<zx::event>::New(1);
+  auto rel = fidl::Array<zx::event>::New(1);
+  frame_buffers_[buffer_index]->dupAcquireFence(&acq.front());
+  frame_buffers_[buffer_index]->dupReleaseFence(&rel.front());
+  // todo: assumes that the image id == buffer_index.
+  // I don't see why it shouldn't...
+  image_pipe->PresentImage(buffer_index_, pres_time, std::move(acq),
+                           std::move(rel),
+                           fbl::BindMember(this, &View::OnFramePresented));
+
+  // auto present_image_callback = [this](scenic::PresentationInfoPtr info) {
+      // this->OnFramePresented(info);
+  // };
+}
 
 
+// When an incomming buffer is  filled, View releases the aquire fence
+void View::IncomingBufferFilled(uint32_t buffer_index) {
+  if (buffer_index >= kNumFramebuffers) {
+    return; //TODO: error
+  }
+  // If we have not reserved the buffer, do so now:
+  // TODO: How do we know that a frame is presented?  eek. assume it is not :(
+  //TODO: add ability to check if frame is presented
+  ReserveIncomingBuffer(buffer_index);
+
+  // Signal that the buffer is ready to be presented:
+  frame_buffers_[buffer_index].Signal();
 
 }
 
@@ -201,7 +253,7 @@ class FrameScheduler {
   std::deque<uint64_t> requested_presentation_times_;
  public:
   // Get the next frame presentation time
-  uint64_t NextFrame() {
+  uint64_t GetNextPresentationTime() {
     last_presentation_time_ns_ += presentation_interval_ns_;
     requested_presentation_times_.push_back(last_presentation_time_ns_);
     return last_presentation_time_ns_;
@@ -210,7 +262,7 @@ class FrameScheduler {
   void Update(uint64_t presentation_time, uint64_t presentation_interval) {
     if (requested_presentation_times_.size() == 0) {
       return;
-    } // todo: and lots of errors
+    } // todo: add lots of errors
     int64_t diff = presentation_time - requested_presentation_times_.pop_front();
     if (diff > 0) {
       // we are behind - we need to advance our presentation timing
@@ -221,12 +273,72 @@ class FrameScheduler {
 
 };
 
+struct BufferLayout {
+  uint64_t vmo_offset;
+  uint32_t width, height, bpp;
+};
+
+
+// This would usually be passed to the display app
+void CreateIncomingBuffer(std::vector<BufferLayout> *buffers, zx::vmo *buffer_vmo) {
+// this creates our own vmo, which acts like we are getting information from
+// a video source
+  // The video source would also specify image size and the number of buffers:
+  uint32_t width = 640, height = 480, bpp = 1;
+  uint32_t number_of_buffers = 5;
+  uint64_t buffer_width = width * height * bpp; // this is only true for single plane images...
+  zx::vmo::create(number_of_buffers * buffer_width, 0, buffer_vmo);
+  buffers->clear();
+  // these buffers will be contiguous:
+  for (uint64_t i = 0; i < number_of_buffers; ++i) {
+    BufferLayout layout;
+    layout.vmo_offset = i * buffer_width;
+    layout.width = width;
+    layout.height = height;
+    layout.bpp = bpp;
+    buffers->push_back(layout);
+  }
+}
+
+zx_status_t View::SetupBuffers(const std::vector<BufferLayout> &buffer_layouts, 
+                   const zx::vmo &vmo) {
+  frame_buffers_.resize(buffer_layouts.size());
+  frame_handlers_.resize(0);
+  auto image_info = scenic::ImageInfo::New();
+  image_info->stride = 0;  // inapplicable to GPU_OPTIMAL tiling.
+  image_info->tiling = scenic::ImageInfo::Tiling::GPU_OPTIMAL;
+
+  for (uint64_t i = 0; i < buffer_layouts.size(); ++i) {
+    Buffer *b = Buffer::NewBuffer(buffer_layouts[i].width,
+                                  buffer_layouts[i].height,
+                                  vmo,
+                                  buffer_layouts[i].vmo_offset);
+    if (nullptr == b) {
+      return ZX_ERR_INTERNAL;
+    }
+    frame_buffers_[i] = b;
+    image_info->width = buffer_layouts[i].width;
+    image_info->height = buffer_layouts[i].height;
+
+    zx::vmo vmo;
+    b->dupVmo(&vmo);
+
+    image_pipe->AddImage(image_pipe_id, image_info, std::move(vmo),
+                         scenic::MemoryType::HOST_MEMORY,
+                         buffer_layouts[i].vmo_offset);
+    // now set up a callback for when the release fense is set:
+    BufferHandler handler(b, i, fbl::BindMember(this, &View::BufferReleased));
+    frame_buffers_.push_back(std::move(handler));
+  }
+  return ZX_OK;
+}
+
 View::View(app::ApplicationContext* application_context,
            mozart::ViewManagerPtr view_manager,
            fidl::InterfaceRequest<mozart::ViewOwner> view_owner_request)
     : BaseView(std::move(view_manager),
                std::move(view_owner_request),
-               "Shadertoy Example"),
+               "Video Display Example"),
       application_context_(application_context),
       loop_(fsl::MessageLoop::GetCurrent()),
       node_(session()),
@@ -251,12 +363,14 @@ View::View(app::ApplicationContext* application_context,
   parent_node().AddChild(node_);
 
 
-// this creates our own vmo, which acts like we are getting information from
-// a video source
-  // The video source would also specify image size and the number of buffers:
-  uint32_t width = 640, height = 480, bpp = 1;
-  uint64_t buffer_width = width * height * bpp; // this is only true for single plane images...
-  zx::vmo::create(kNumFramebuffers * buffer_width, 0, &vmo_);
+  // We setup the buffers here, but ideally, this all would happen
+  // whenever we got a setup command which gave us buffer information.
+  
+  std::vector<BufferLayout> buffer_layouts;
+  CreateIncomingBuffer(&buffer_layouts, &vmo_);
+  SetupBuffers(buffer_layouts, vmo_);
+
+
   auto image_info = scenic::ImageInfo::New();
   image_info->width = width();
   image_info->height = height();
@@ -275,6 +389,30 @@ View::View(app::ApplicationContext* application_context,
     }
     frame_buffers_.push_back(std::move(frame_buffer));
   }
+
+  //TODO(garratt) stopped here 1/2/18.  
+  //  Next up: add the code below into a loop which creates buffers, then adds
+  //  this handler, then saves the waits to a vector or whatever.
+  sync_t* async = fsl::MessageLoop::GetCurrent()->async();
+  async::AutoWait wait(async, buffer->release_fence().get(), ZX_EVENT_SIGNALED);
+  wait.set_handler([this, wait, buffer_index](async_t* async, 
+                                              zx_status_t status,
+                                              const zx_packet_signal* signal) {
+      if (status != ZX_OK) {
+        FXL_LOG(ERROR) << "AutoWait received an error ("
+                       << zx_status_get_string(status) << ").  Exiting.";
+        wait.Cancel();
+        fsl::MessageLoop::GetCurrent()->PostQuitTask();
+        return ASYNC_WAIT_FINISHED;
+      }
+      this->BufferReleased(buffer_index);
+      return ASYNC_WAIT_AGAIN;
+    });
+  auto status = wait_.Begin();
+  FXL_DCHECK(status == ZX_OK);
+ 
+
+
 }
 
 View::~View() = default;

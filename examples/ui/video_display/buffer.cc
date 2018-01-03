@@ -79,6 +79,10 @@ void Buffer::Fill(uint8_t r, uint8_t g, uint8_t b) {
     vmo_.op_range(ZX_VMO_OP_CACHE_CLEAN, 0, 4096, nullptr, 0);
 }
 
+void Buffer::Reserve() {
+    acquire_fence_.signal(ZX_EVENT_SIGNALED, 0);
+}
+
 void Buffer::Reset() {
     acquire_fence_.signal(ZX_EVENT_SIGNALED, 0);
     release_fence_.signal(ZX_EVENT_SIGNALED, 0);

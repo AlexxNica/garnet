@@ -117,7 +117,7 @@ class View : public mozart::BaseView {
   scenic::ImagePipePtr image_pipe_;
 
   static constexpr uint32_t kNumFramebuffers = 5;
-  Framebuffer framebuffers_[kNumFramebuffers];
+  Framebuffer frame_buffers_[kNumFramebuffers];
   uint32_t buffer_position = 0;
   zx::vmo vmo_;
 
