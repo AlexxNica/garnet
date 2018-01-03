@@ -9,6 +9,7 @@
 #include <iostream>
 
 #include "garnet/examples/escher/common/demo.h"
+#include "garnet/examples/escher/common/demo_harness.h"
 #include "garnet/examples/escher/waterfall/scenes/scene.h"
 
 #include "lib/escher/escher.h"
@@ -38,12 +39,15 @@ class WaterfallDemo : public Demo {
   virtual ~WaterfallDemo();
 
   bool HandleKeyPress(std::string key) override;
+  void BeginTouch(uint64_t touch_id,
+                  double x_position,
+                  double y_position) override;
 
   void DrawFrame() override;
 
  private:
   void ProcessCommandLineArgs(int argc, char** argv);
-  void InitializeEscherStage();
+  void InitializeEscherStage(const DemoHarness::WindowParams& window_params);
   void InitializeDemoScenes();
 
   // Toggle debug overlays.

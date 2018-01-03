@@ -93,9 +93,8 @@ class Engine : private FrameSchedulerDelegate {
 
   size_t GetSessionCount() { return session_count_; }
 
-  // Returns the first compositor in the current compositors, or nullptr if no
-  // compositor exists.
-  Compositor* GetFirstCompositor() const;
+  void AddCompositor(Compositor* compositor);
+  void RemoveCompositor(Compositor* compositor);
 
   // Dumps the contents of all scene graphs.
   std::string DumpScenes() const;
@@ -107,13 +106,8 @@ class Engine : private FrameSchedulerDelegate {
       std::unique_ptr<escher::ReleaseFenceSignaller> release_fence_signaller);
 
  private:
-  friend class Compositor;
   friend class SessionHandler;
   friend class Session;
-
-  // Compositors register/unregister themselves upon creation/destruction.
-  void AddCompositor(Compositor* compositor);
-  void RemoveCompositor(Compositor* compositor);
 
   // Allow overriding to support tests.
   virtual std::unique_ptr<SessionHandler> CreateSessionHandler(
@@ -125,7 +119,7 @@ class Engine : private FrameSchedulerDelegate {
   void TearDownSession(SessionId id);
 
   // |FrameSchedulerDelegate|:
-  void RenderFrame(const FrameTimingsPtr& frame,
+  bool RenderFrame(const FrameTimingsPtr& frame,
                    uint64_t presentation_time,
                    uint64_t presentation_interval) override;
 
@@ -143,6 +137,11 @@ class Engine : private FrameSchedulerDelegate {
   void UpdateMetrics(Node* node,
                      const scenic::Metrics& parent_metrics,
                      std::vector<Node*>* updated_nodes);
+
+  // Invoke Escher::Cleanup().  If more work remains afterward, post a delayed
+  // task to try again; this is typically because cleanup couldn't finish due to
+  // unfinished GPU work.
+  void CleanupEscher();
 
   DisplayManager* const display_manager_;
   escher::Escher* const escher_;
@@ -162,9 +161,13 @@ class Engine : private FrameSchedulerDelegate {
   std::atomic<size_t> session_count_;
   SessionId next_session_id_ = 1;
 
+  bool escher_cleanup_scheduled_ = false;
+
   // Lists all Session that have updates to apply, sorted by the earliest
   // requested presentation time of each update.
   std::set<std::pair<uint64_t, fxl::RefPtr<Session>>> updatable_sessions_;
+
+  fxl::WeakPtrFactory<Engine> weak_factory_;  // must be last
 
   FXL_DISALLOW_COPY_AND_ASSIGN(Engine);
 };

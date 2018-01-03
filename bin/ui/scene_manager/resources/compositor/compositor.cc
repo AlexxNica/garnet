@@ -62,10 +62,16 @@ bool Compositor::SetLayerStack(LayerStackPtr layer_stack) {
 // Helper function for DrawLayer().
 static void InitEscherStage(
     escher::Stage* stage,
-    const escher::ViewingVolume& viewing_volume,
+    uint32_t width,
+    uint32_t height,
     const std::vector<AmbientLightPtr>& ambient_lights,
     const std::vector<DirectionalLightPtr>& directional_lights) {
-  stage->set_viewing_volume(viewing_volume);
+  // TODO(MZ-194): Define these properties on the Scene instead of hardcoding
+  // them here.
+  constexpr float kTop = 1000;
+  constexpr float kBottom = 0;
+  stage->set_viewing_volume(
+      {static_cast<float>(width), static_cast<float>(height), kTop, kBottom});
 
   if (ambient_lights.empty()) {
     constexpr float kIntensity = 0.3f;
@@ -137,8 +143,8 @@ void Compositor::DrawLayer(const escher::FramePtr& frame,
   auto& scene = renderer->camera()->scene();
 
   escher::Stage stage;
-  InitEscherStage(&stage, layer->GetViewingVolume(), scene->ambient_lights(),
-                  scene->directional_lights());
+  InitEscherStage(&stage, output_image->width(), output_image->height(),
+                  scene->ambient_lights(), scene->directional_lights());
   escher::Model model(renderer->CreateDisplayList(renderer->camera()->scene(),
                                                   escher::vec2(layer->size())));
   escher::Camera camera =
@@ -155,7 +161,7 @@ void Compositor::DrawLayer(const escher::FramePtr& frame,
       break;
     case scenic::ShadowTechnique::MOMENT_SHADOW_MAP:
       FXL_DLOG(WARNING) << "Moment shadow maps not implemented";
-    // Fallthrough to regular shadow maps.
+      // fallthrough to regular shadow maps.
     case scenic::ShadowTechnique::SHADOW_MAP:
       escher_renderer->set_shadow_type(
           escher::PaperRendererShadowType::kShadowMap);
@@ -170,14 +176,14 @@ void Compositor::DrawLayer(const escher::FramePtr& frame,
                              shadow_map, overlay_model);
 }
 
-void Compositor::DrawFrame(const FrameTimingsPtr& frame_timings,
+bool Compositor::DrawFrame(const FrameTimingsPtr& frame_timings,
                            escher::PaperRenderer* escher_renderer,
                            escher::ShadowMapRenderer* shadow_renderer) {
   TRACE_DURATION("gfx", "Compositor::DrawFrame");
 
   // Obtain a list of drawable layers.
   if (!layer_stack_)
-    return;
+    return false;
   std::vector<Layer*> drawable_layers;
   for (auto& layer : layer_stack_->layers()) {
     if (layer->IsDrawable()) {
@@ -185,7 +191,7 @@ void Compositor::DrawFrame(const FrameTimingsPtr& frame_timings,
     }
   }
   if (drawable_layers.empty())
-    return;
+    return false;
 
   // Sort the layers from bottom to top.
   std::sort(drawable_layers.begin(), drawable_layers.end(), [](auto a, auto b) {
@@ -220,7 +226,7 @@ void Compositor::DrawFrame(const FrameTimingsPtr& frame_timings,
   }
   escher::Model overlay_model(std::move(layer_objects));
 
-  swapchain_->DrawAndPresentFrame(
+  bool success = swapchain_->DrawAndPresentFrame(
       frame_timings,
       [
         this, frame{std::move(frame)}, escher_renderer, shadow_renderer,
@@ -240,6 +246,8 @@ void Compositor::DrawFrame(const FrameTimingsPtr& frame_timings,
     Accept(&visitor);
     FXL_VLOG(3) << "Renderer dump\n" << output.str();
   }
+
+  return success;
 }
 
 escher::ImagePtr Compositor::GetLayerFramebufferImage(uint32_t width,

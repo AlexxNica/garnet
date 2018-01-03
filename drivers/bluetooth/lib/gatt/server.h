@@ -38,10 +38,16 @@ class Server final {
   // ATT protocol request handlers:
   void OnExchangeMTU(att::Bearer::TransactionId tid,
                      const att::PacketReader& packet);
+  void OnFindInformation(att::Bearer::TransactionId tid,
+                         const att::PacketReader& packet);
   void OnReadByGroupType(att::Bearer::TransactionId tid,
                          const att::PacketReader& packet);
   void OnReadByType(att::Bearer::TransactionId tid,
                     const att::PacketReader& packet);
+  void OnReadRequest(att::Bearer::TransactionId tid,
+                     const att::PacketReader& packet);
+  void OnWriteRequest(att::Bearer::TransactionId tid,
+                      const att::PacketReader& packet);
 
   // Helper function to serve the Read By Type and Read By Group Type requests.
   // This searches |db| for attributes with the given |type| and adds as many
@@ -70,8 +76,11 @@ class Server final {
 
   // ATT protocol request handler IDs
   att::Bearer::HandlerId exchange_mtu_id_;
+  att::Bearer::HandlerId find_information_id_;
   att::Bearer::HandlerId read_by_group_type_id_;
   att::Bearer::HandlerId read_by_type_id_;
+  att::Bearer::HandlerId read_req_id_;
+  att::Bearer::HandlerId write_req_id_;
 
   fxl::WeakPtrFactory<Server> weak_ptr_factory_;
 

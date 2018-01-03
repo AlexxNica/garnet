@@ -37,7 +37,8 @@ Engine::Engine(DisplayManager* display_manager, escher::Escher* escher)
           std::make_unique<escher::RoundedRectFactory>(escher)),
       release_fence_signaller_(std::make_unique<escher::ReleaseFenceSignaller>(
           escher->command_buffer_sequencer())),
-      session_count_(0) {
+      session_count_(0),
+      weak_factory_(this) {
   FXL_DCHECK(display_manager_);
   FXL_DCHECK(escher_);
 
@@ -50,7 +51,8 @@ Engine::Engine(
     std::unique_ptr<escher::ReleaseFenceSignaller> release_fence_signaller)
     : display_manager_(display_manager),
       escher_(nullptr),
-      release_fence_signaller_(std::move(release_fence_signaller)) {
+      release_fence_signaller_(std::move(release_fence_signaller)),
+      weak_factory_(this) {
   FXL_DCHECK(display_manager_);
 
   InitializeFrameScheduler();
@@ -135,21 +137,28 @@ void Engine::TearDownSession(SessionId id) {
   }
 }
 
-void Engine::RenderFrame(const FrameTimingsPtr& timings,
+bool Engine::RenderFrame(const FrameTimingsPtr& timings,
                          uint64_t presentation_time,
                          uint64_t presentation_interval) {
   TRACE_DURATION("gfx", "RenderFrame", "frame_number", timings->frame_number(),
                  "time", presentation_time, "interval", presentation_interval);
 
   if (!ApplyScheduledSessionUpdates(presentation_time, presentation_interval))
-    return;
+    return false;
 
   UpdateAndDeliverMetrics(presentation_time);
 
+  bool frame_drawn = false;
   for (auto& compositor : compositors_) {
-    compositor->DrawFrame(timings, paper_renderer_.get(),
-                          shadow_renderer_.get());
+    frame_drawn |= compositor->DrawFrame(timings, paper_renderer_.get(),
+                                         shadow_renderer_.get());
   }
+
+  // Technically, we should be able to do this only when frame_drawn == true.
+  // But the cost is negligible, so do it always.
+  CleanupEscher();
+
+  return frame_drawn;
 }
 
 bool Engine::ApplyScheduledSessionUpdates(uint64_t presentation_time,
@@ -190,11 +199,6 @@ void Engine::RemoveCompositor(Compositor* compositor) {
 
   size_t count = compositors_.erase(compositor);
   FXL_DCHECK(count == 1);
-}
-
-Compositor* Engine::GetFirstCompositor() const {
-  FXL_DCHECK(!compositors_.empty());
-  return compositors_.empty() ? nullptr : *compositors_.begin();
 }
 
 void Engine::UpdateAndDeliverMetrics(uint64_t presentation_time) {
@@ -253,6 +257,31 @@ void Engine::UpdateMetrics(Node* node,
       *node, [this, &local_metrics, updated_nodes](Node* node) {
         UpdateMetrics(node, local_metrics, updated_nodes);
       });
+}
+
+void Engine::CleanupEscher() {
+  // Either there is already a cleanup scheduled (meaning that this was already
+  // called recently), or there is no Escher because we're running tests.
+  if (!escher_ || escher_cleanup_scheduled_) {
+    return;
+  }
+  // Only trace when there is the possibility of doing work.
+  TRACE_DURATION("gfx", "Engine::CleanupEscher");
+
+  if (!escher_->Cleanup()) {
+    // Wait long enough to give GPU work a chance to finish.
+    const fxl::TimeDelta kCleanupDelay = fxl::TimeDelta::FromMilliseconds(1);
+    escher_cleanup_scheduled_ = true;
+    fsl::MessageLoop::GetCurrent()->task_runner()->PostDelayedTask(
+        [weak = weak_factory_.GetWeakPtr()] {
+          if (weak) {
+            // Recursively reschedule if cleanup is incomplete.
+            weak->escher_cleanup_scheduled_ = false;
+            weak->CleanupEscher();
+          }
+        },
+        kCleanupDelay);
+  }
 }
 
 std::string Engine::DumpScenes() const {

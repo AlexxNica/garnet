@@ -40,7 +40,7 @@ WaterfallDemo::WaterfallDemo(DemoHarness* harness, int argc, char** argv)
                         escher()->vulkan_context().device,
                         escher()->vulkan_context().queue) {
   ProcessCommandLineArgs(argc, argv);
-  InitializeEscherStage();
+  InitializeEscherStage(harness->GetWindowParams());
   InitializeDemoScenes();
 }
 
@@ -77,9 +77,9 @@ void WaterfallDemo::ProcessCommandLineArgs(int argc, char** argv) {
   }
 }
 
-void WaterfallDemo::InitializeEscherStage() {
+void WaterfallDemo::InitializeEscherStage(const DemoHarness::WindowParams& window_params) {
   stage_.set_viewing_volume(
-      escher::ViewingVolume(kDemoWidth, kDemoHeight, kNear, kFar));
+      escher::ViewingVolume(window_params.width, window_params.height, kNear, kFar));
   stage_.set_key_light(
       escher::DirectionalLight(escher::vec2(1.5f * M_PI, 1.5f * M_PI),
                                0.15f * M_PI, vec3(kLightIntensity)));
@@ -206,8 +206,9 @@ static escher::Camera GenerateCamera(int camera_projection_mode,
 
     case 1:
       return escher::Camera::NewPerspective(
-          volume, glm::translate(
-                      vec3(-volume.width() / 2, -volume.height() / 2, -10000)),
+          volume,
+          glm::translate(
+              vec3(-volume.width() / 2, -volume.height() / 2, -10000)),
           glm::radians(8.f));
     case 2: {
       vec3 eye(volume.width() / 3, 6000, 3000);
@@ -320,4 +321,31 @@ void WaterfallDemo::DrawFrame() {
   } else {
     profile_one_frame_ = false;
   }
+}
+
+void WaterfallDemo::BeginTouch(uint64_t touch_id,
+                               double x_position,
+                               double y_position) {
+  if (camera_projection_mode_ == 0)
+    return;
+
+  escher::Camera camera =
+      GenerateCamera(camera_projection_mode_, stage_.viewing_volume());
+  // See GenerateCamera().
+  float fovy = glm::radians(camera_projection_mode_ == 1 ? 8.f : 15.f);
+
+  auto ray =
+      escher::Camera::ScreenPointToRay(x_position, y_position, kDemoWidth,
+                                       kDemoHeight, fovy, camera.transform());
+
+  float intersection_multiple = ray.origin.z / ray.direction.z;
+  escher::vec4 intersection =
+      ray.origin - intersection_multiple * ray.direction;
+
+  FXL_LOG(INFO) << "x: " << x_position << "  y: " << y_position
+                << "\nray: " << ray.origin.x << "," << ray.origin.y << ","
+                << ray.origin.z << "/" << ray.direction.x << ","
+                << ray.direction.y << "," << ray.direction.z
+                << "\nintersection: " << intersection.x << ","
+                << intersection.y;
 }

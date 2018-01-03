@@ -43,7 +43,7 @@ class FrameSchedulerDelegate {
   // callback which is invoked when all renderers finish work for that frame.
   // Then FrameScheduler should listen to the callback to count how many
   // frames are in flight and back off.
-  virtual void RenderFrame(const FrameTimingsPtr& frame_timings,
+  virtual bool RenderFrame(const FrameTimingsPtr& frame_timings,
                            uint64_t presentation_time,
                            uint64_t presentation_interval) = 0;
 };
@@ -102,7 +102,8 @@ class FrameScheduler {
   FrameSchedulerDelegate* delegate_;
   Display* const display_;
 
-  std::priority_queue<uint64_t> requested_presentation_times_;
+  std::priority_queue<uint64_t, std::vector<uint64_t>, std::greater<uint64_t>>
+      requested_presentation_times_;
 
   uint64_t frame_number_ = 0;
   constexpr static size_t kMaxOutstandingFrames = 2;
