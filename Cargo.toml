@@ -11,6 +11,7 @@ members =  [
   "public/rust/crates/fuchsia-zircon/fuchsia-zircon-sys",
   "public/rust/crates/mxruntime",
   "public/rust/crates/mxruntime/mxruntime-sys",
+  "public/rust/tools/gn-deps",
   "public/rust/fidl_crates/garnet_examples_fidl_services",
   "public/rust/fidl_crates/garnet_public_lib_app_fidl",
   "public/rust/fidl_crates/garnet_public_lib_app_fidl_service_provider",
