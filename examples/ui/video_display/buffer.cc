@@ -12,7 +12,7 @@
 #include "buffer.h"
 
 // Buffer *Buffer::NewBuffer(uint32_t width, uint32_t height) {
-Buffer *Buffer::NewBuffer(uint32_t width, uint32_t height, zx::vmo &main_buffer, uint64_t offset) {
+Buffer *Buffer::NewBuffer(uint32_t width, uint32_t height, const zx::vmo &main_buffer, uint64_t offset) {
     uint64_t buffer_size = width * height * 4;
     zx::vmo vmo;
     zx_status_t err = main_buffer.duplicate(ZX_RIGHT_SAME_RIGHTS, &vmo);
@@ -53,7 +53,7 @@ Buffer *Buffer::NewBuffer(uint32_t width, uint32_t height, zx::vmo &main_buffer,
     b->size_ = buffer_size;
     b->width_ = width;
     b->height_ = height;
-    b->vmo_offset_ = offset;
+    b->vmo_offset = offset;
 
     b->acquire_fence_ = std::move(acquire_fence);
     b->release_fence_ = std::move(release_fence);

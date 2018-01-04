@@ -8,6 +8,11 @@
 
 #include <zx/event.h>
 #include <zx/vmo.h>
+#include "lib/fsl/tasks/message_loop.h"
+#include "lib/fxl/command_line.h"
+#include "lib/fxl/log_settings_command_line.h"
+#include "lib/fxl/logging.h"
+#include "zircon/status.h"
 
 struct Buffer {
  public:
@@ -34,9 +39,9 @@ struct Buffer {
      vmo_.duplicate(ZX_RIGHT_SAME_RIGHTS & ~ZX_RIGHT_WRITE, result);
   }
 
-  static Buffer *NewBuffer(uint32_t width, uint32_t height, zx::vmo &main_buffer, uint64_t offset);
+  static Buffer *NewBuffer(uint32_t width, uint32_t height, const zx::vmo &main_buffer, uint64_t offset);
 
-  IsReserved() { 
+  bool IsReserved() { 
     // TODO: make sure this actually works, and doesn't just always throw the
     // timeout...
     return ZX_ERR_TIMED_OUT == acquire_fence_.wait_one(ZX_EVENT_SIGNALED, 0, 

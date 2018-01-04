@@ -4,7 +4,7 @@
 
 #include <trace-provider/provider.h>
 
-#include "garnet/examples/ui/shadertoy/client/view.h"
+#include "garnet/examples/ui/video_display/view.h"
 #include "lib/fsl/tasks/message_loop.h"
 #include "lib/fxl/command_line.h"
 #include "lib/fxl/log_settings_command_line.h"
@@ -19,7 +19,7 @@ int main(int argc, const char** argv) {
   trace::TraceProvider trace_provider(loop.async());
 
   mozart::ViewProviderApp app([](mozart::ViewContext view_context) {
-    return std::make_unique<shadertoy_client::View>(
+    return std::make_unique<video_display::View>(
         view_context.application_context, std::move(view_context.view_manager),
         std::move(view_context.view_owner_request));
   });
