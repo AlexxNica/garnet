@@ -7,6 +7,7 @@ import("//build/package.gni")
 group("ui") {
   public_deps = [
     "hello_scene_manager",
+    "video_display",
     "shadertoy/client",
     "shadertoy/service",
     "shapes",
@@ -26,6 +27,19 @@ package("hello_scene_manager") {
   binaries = [ {
         name = "hello_scene_manager"
       } ]
+}
+
+package("video_display") {
+  system_image = true
+
+  deps = [
+    "video_display",
+  ]
+
+  binaries = [ {
+        name = "video_display"
+      } ]
+
 }
 
 package("shadertoy_client") {
