@@ -6,8 +6,8 @@ executable("video_display") {
   output_name = "video_display"
 
   sources = [
-    "glsl_strings.cc",
-    "glsl_strings.h",
+    "buffer.cc",
+    "buffer.h",
     "main.cc",
     "view.cc",
     "view.h",
