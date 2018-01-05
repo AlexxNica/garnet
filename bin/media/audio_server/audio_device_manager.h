@@ -126,8 +126,12 @@ class AudioDeviceManager {
   // Methods for dealing with routing policy when a device becomes unplugged or
   // completely removed from the system, or has become plugged/newly added to
   // the system.
-  void OnDeviceUnplugged(const fbl::RefPtr<AudioDevice>& device);
-  void OnDevicePlugged(const fbl::RefPtr<AudioDevice>& device);
+  void OnDeviceUnplugged(const fbl::RefPtr<AudioDevice>& device,
+                         zx_time_t plug_time);
+  void OnDevicePlugged(const fbl::RefPtr<AudioDevice>& device,
+                       zx_time_t plug_time);
+
+  void LinkToCapturers(const fbl::RefPtr<AudioDevice>& device);
 
   // A pointer to the server which encapsulates us.  It is not possible for this
   // pointer to be bad while we still exist.

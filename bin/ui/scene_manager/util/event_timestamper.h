@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef GARNET_BIN_UI_SCENE_MANAGER_UTIL_EVENT_TIMESTAMPER_H_
+#define GARNET_BIN_UI_SCENE_MANAGER_UTIL_EVENT_TIMESTAMPER_H_
 
 #include <functional>
 
@@ -46,13 +47,17 @@ class EventTimestamper {
           zx::event event,
           zx_status_t trigger,
           Callback callback);
-    Watch(Watch&&);
+    Watch(Watch&& rhs);
+    Watch& operator=(Watch&& rhs);
     ~Watch();
 
     // Start watching for the event to be signaled.  It is illegal to call
     // Start() again before the callback has been invoked (it is safe to invoke
     // Start() again from within the callback).
     void Start();
+
+    // Return the watched event (or a null handle, if this Watch was moved).
+    const zx::event& event() const;
 
    private:
     Wait* wait_;
@@ -80,6 +85,7 @@ class EventTimestamper {
     State state() const { return state_; }
 
     async::Wait& wait() { return wait_; }
+    const zx::event& event() const { return event_; }
 
    private:
     async_wait_result_t Handle(async_t* async,
@@ -113,3 +119,5 @@ class EventTimestamper {
 };
 
 }  // namespace scene_manager
+
+#endif  // GARNET_BIN_UI_SCENE_MANAGER_UTIL_EVENT_TIMESTAMPER_H_

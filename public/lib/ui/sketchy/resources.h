@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef LIB_UI_SKETCHY_RESOURCES_H_
+#define LIB_UI_SKETCHY_RESOURCES_H_
 
 #include "lib/ui/scenic/client/session.h"
 #include "lib/ui/fun/sketchy/fidl/ops.fidl.h"
@@ -28,7 +29,7 @@ class Resource {
   ResourceId id() const { return id_; }
 
  protected:
-  Resource(Canvas* canvas);
+  explicit Resource(Canvas* canvas);
 
   // Enqueue an op in canvas to destroy a resource. Called in destructor of
   // concrete resources. The remote resource may still live until no other
@@ -63,8 +64,12 @@ class Resource {
 // Represents a stroke in a canvas.
 class Stroke final : public Resource {
  public:
-  Stroke(Canvas* canvas);
+  explicit Stroke(Canvas* canvas);
   void SetPath(StrokePath& path);
+  void Begin(glm::vec2 pt);
+  // TODO(MZ-269): Also pass in predicted points.
+  void Extend(std::vector<glm::vec2> pts);
+  void Finish();
 
  private:
   FXL_DISALLOW_COPY_AND_ASSIGN(Stroke);
@@ -73,8 +78,9 @@ class Stroke final : public Resource {
 // Represents a group of stroke(s) in a canvas.
 class StrokeGroup final : public Resource {
  public:
-  StrokeGroup(Canvas* canvas);
+  explicit StrokeGroup(Canvas* canvas);
   void AddStroke(Stroke& stroke);
+  void RemoveStroke(Stroke& stroke);
 
  private:
   FXL_DISALLOW_COPY_AND_ASSIGN(StrokeGroup);
@@ -91,3 +97,5 @@ class ImportNode final : public Resource {
 };
 
 }  // namespace sketchy_lib
+
+#endif  // LIB_UI_SKETCHY_RESOURCES_H_

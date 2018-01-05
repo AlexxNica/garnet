@@ -2,10 +2,13 @@
 <manifest>
   <imports>
     <localimport file="minimal"/>
-    <localimport file="skia"/>
     <import remote="https://fuchsia.googlesource.com/manifest"
             manifest="build"
             name="manifest"/>
+    <import remote="https://fuchsia.googlesource.com/third_party/boringssl"
+            manifest="manifest"
+            name="third_party/boringssl"
+            revision="6d838c7bf36506286b19f33cb1ef1312c045bb77"/>
   </imports>
   <projects>
     <!-- Third Party -->
@@ -33,16 +36,6 @@
              path="third_party/benchmark"
              remote="https://fuchsia.googlesource.com/third_party/benchmark"
              gerrithost="https://fuchsia-review.googlesource.com"/>
-    <project name="third_party/boringssl"
-             path="third_party/boringssl"
-             remote="https://fuchsia.googlesource.com/third_party/boringssl"
-             revision="03458bb801b93b91017f73a0b3ea1b3a00442b9a"
-             gerrithost="https://fuchsia-review.googlesource.com"/>
-    <project name="third_party/cairo"
-             path="third_party/cairo"
-             remote="https://fuchsia.googlesource.com/third_party/cairo"
-             gerrithost="https://fuchsia-review.googlesource.com"
-             historydepth="1"/>
     <project name="third_party/cares"
              path="third_party/cares"
              remote="https://fuchsia.googlesource.com/third_party/c-ares"
@@ -50,8 +43,12 @@
     <project name="cobalt"
              path="third_party/cobalt"
              remote="https://fuchsia.googlesource.com/cobalt"
-             revision="0b3208677728f9b8ac108f0e1bd59a6bf65f93b6"
+             revision="579a2eabad3b953b80a1ee0ae9e1ae46dc9d7825"
              gerrithost="https://fuchsia-review.googlesource.com"/>
+    <project name="cobalt_config"
+             path="third_party/cobalt_config"
+             remote="https://cobalt-analytics.googlesource.com/config"
+             gerrithost="https://cobalt-analytics-review.googlesource.com"/>
     <project name="third_party/expat"
              path="third_party/expat"
              remote="https://fuchsia.googlesource.com/third_party/expat"
@@ -64,9 +61,9 @@
              path="third_party/flatbuffers"
              remote="https://fuchsia.googlesource.com/third_party/flatbuffers"
              gerrithost="https://fuchsia-review.googlesource.com"/>
-    <project name="third_party/freetype2"
-             path="third_party/freetype2"
-             remote="https://fuchsia.googlesource.com/third_party/freetype2"
+    <project name="third_party/flite"
+             path="third_party/flite"
+             remote="https://fuchsia.googlesource.com/third_party/flite"
              gerrithost="https://fuchsia-review.googlesource.com"/>
     <project name="third_party/gflags"
              path="third_party/gflags"
@@ -87,7 +84,7 @@
     <project name="third_party/go"
              remote="https://fuchsia.googlesource.com/third_party/go"
              gerrithost="https://fuchsia-review.googlesource.com"
-             revision="f68e6f80c24ece54f7309fb4ef0fbee2b492455e"
+             revision="f8b939d1b6bfa7065fd1adb455cb411cb11a6339"
              path="third_party/go"/>
     <project name="go_x_crypto"
              path="third_party/golang/crypto"
@@ -108,6 +105,19 @@
     <project name="third_party/golibs/github.com/pkg/sftp"
              path="third_party/golibs/github.com/pkg/sftp"
              remote="https://fuchsia.googlesource.com/third_party/github.com/pkg/sftp"
+             gerrithost="https://fuchsia-review.googlesource.com"/>
+    <project name="third_party/golibs/github.com/go-yaml/yaml"
+             path="third_party/golibs/github.com/go-yaml/yaml"
+             remote="https://fuchsia.googlesource.com/third_party/github.com/go-yaml/yaml"
+             remotebranch="v2"
+             gerrithost="https://fuchsia-review.googlesource.com"/>
+    <project name="third_party/golibs/github.com/golang/glog"
+             path="third_party/golibs/github.com/golang/glog"
+             remote="https://fuchsia.googlesource.com/third_party/golang/glog"
+             gerrithost="https://fuchsia-review.googlesource.com"/>
+    <project name="third_party/golibs/github.com/golang/protobuf"
+             path="third_party/golibs/github.com/golang/protobuf"
+             remote="https://fuchsia.googlesource.com/third_party/golang/protobuf"
              gerrithost="https://fuchsia-review.googlesource.com"/>
     <!-- gRPC contact: rudominer. -->
     <project name="third_party/grpc"
@@ -131,14 +141,6 @@
              path="third_party/jinja2"
              remote="https://fuchsia.googlesource.com/third_party/jinja2"
              gerrithost="https://fuchsia-review.googlesource.com"/>
-    <project name="third_party/libjpeg-turbo"
-             path="third_party/libjpeg-turbo"
-             remote="https://fuchsia.googlesource.com/third_party/libjpeg-turbo"
-             gerrithost="https://fuchsia-review.googlesource.com"/>
-    <project name="third_party/libpng"
-             path="third_party/libpng"
-             remote="https://fuchsia.googlesource.com/third_party/libpng"
-             gerrithost="https://fuchsia-review.googlesource.com"/>
     <project name="third_party/markupsafe"
              path="third_party/markupsafe"
              remote="https://fuchsia.googlesource.com/third_party/markupsafe"
@@ -147,10 +149,12 @@
              path="third_party/mesa"
              remote="https://fuchsia.googlesource.com/third_party/mesa"
              remotebranch="master"
+             revision="3603babc3ccea6a4424473b7869eb881996622a2"
              gerrithost="https://fuchsia-review.googlesource.com"/>
     <project name="third_party/netstack"
              path="third_party/netstack"
              remote="https://fuchsia.googlesource.com/third_party/netstack"
+             revision="1ef6cb0ddbd0f1ea84e763b28bf7f2b104382739"
              gerrithost="https://fuchsia-review.googlesource.com"/>
     <project name="third_party/processor-trace"
              path="third_party/processor-trace"
@@ -182,11 +186,6 @@
              path="third_party/rust-mirrors/mio"
              remote="https://fuchsia.googlesource.com/third_party/mio"
              gerrithost="https://fuchsia-review.googlesource.com"/>
-    <project name="third_party/pixman"
-             path="third_party/pixman"
-             remote="https://fuchsia.googlesource.com/third_party/pixman"
-             gerrithost="https://fuchsia-review.googlesource.com"
-             historydepth="1"/>
     <project name="third_party/tokio-core"
              path="third_party/rust-mirrors/tokio-core"
              remote="https://fuchsia.googlesource.com/third_party/tokio-core"

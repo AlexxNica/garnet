@@ -14,7 +14,7 @@
 
 #include "lib/fxl/macros.h"
 
-namespace bluetooth {
+namespace btlib {
 namespace att {
 
 // v5.0, Vol 3, Part G, 5.1.2
@@ -205,6 +205,9 @@ struct FindByTypeValueResponseParams {
 constexpr OpCode kReadByTypeRequest = 0x08;
 constexpr OpCode kReadByTypeResponse = 0x09;
 
+// (see Vol 3, Part F, 3.4.4.2)
+constexpr uint8_t kMaxReadByTypeValueLength = 253;
+
 template <UUIDType Format>
 struct ReadByTypeRequestParams {
   Handle start_handle;
@@ -326,4 +329,4 @@ constexpr OpCode kConfirmation = 0x1E;
 using IndicationParams = AttributeData;
 
 }  // namespace att
-}  // namespace bluetooth
+}  // namespace btlib

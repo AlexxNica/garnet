@@ -23,34 +23,54 @@ zx_status_t ApMlme::Init() {
         return status;
     }
 
-    // TODO(hahnr): For development only to unblock from SME changes.
-    // To be removed soon.
-    auto req = StartRequest::New();
-    req->ssid = "FUCHSIA-TEST-AP";
-    req->beacon_period = 100;
-    HandleMlmeStartReq(*req);
+    // Create a BSS. It'll become active once MLME issues a Start request.
+    auto& bssid = device_->GetState()->address();
+    bss_ = fbl::AdoptRef(new InfraBss(device_, bssid));
 
     return ZX_OK;
 }
 
 zx_status_t ApMlme::HandleTimeout(const ObjectId id) {
     debugfn();
-    // TODO(hahnr): Implement.
+
+    switch (id.target()) {
+    case to_enum_type(ObjectTarget::kBss):{
+        common::MacAddr client_addr(id.mac());
+        return bss_->HandleTimeout(client_addr);
+    }
+    default:
+        ZX_DEBUG_ASSERT(false);
+        break;
+    }
+
     return ZX_OK;
 }
 
 zx_status_t ApMlme::HandleMlmeStartReq(const StartRequest& req) {
     debugfn();
 
+    if (bcn_sender_->IsStarted()) {
+        errorf("received MLME-START.request while already running\n");
+        return ZX_OK;
+    }
+
     bcn_sender_->Start(req);
-    // TODO(hahnr): Create BSS instance which manages clients.
+    AddChildHandler(bss_);
 
     return ZX_OK;
 }
 
 zx_status_t ApMlme::HandleMlmeStopReq(const StopRequest& req) {
     debugfn();
-    // TODO(hahnr): Implement.
+
+    if (!bcn_sender_->IsStarted()) {
+        errorf("received MLME-STOP.request without running\n");
+        return ZX_OK;
+    }
+
+    bcn_sender_->Stop();
+    RemoveChildHandler(bss_);
+
     return ZX_OK;
 }
 

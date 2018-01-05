@@ -10,6 +10,12 @@ namespace sketchy_service {
 StrokeManager::StrokeManager(escher::Escher* escher)
     : stroke_tessellator_(escher) {}
 
+bool StrokeManager::AddNewGroup(StrokeGroupPtr group) {
+  group->SetNeedsReTessellation();
+  dirty_stroke_groups_.insert(group);
+  return true;
+}
+
 bool StrokeManager::AddStrokeToGroup(StrokePtr stroke, StrokeGroupPtr group) {
   if (stroke_to_group_map_.find(stroke) != stroke_to_group_map_.end()) {
     FXL_LOG(ERROR) << "Stroke has already been added to group!";
@@ -18,6 +24,17 @@ bool StrokeManager::AddStrokeToGroup(StrokePtr stroke, StrokeGroupPtr group) {
   stroke_to_group_map_.insert({stroke, group});
   dirty_stroke_groups_.insert(group);
   return group->AddStroke(std::move(stroke));
+}
+
+bool StrokeManager::RemoveStrokeFromGroup(StrokePtr stroke,
+                                          StrokeGroupPtr group) {
+  if (stroke_to_group_map_.find(stroke)->second != group) {
+    FXL_LOG(ERROR) << "Stroke does not belong to group!";
+    return false;
+  }
+  stroke_to_group_map_.erase(stroke);
+  dirty_stroke_groups_.insert(group);
+  return group->RemoveStroke(stroke);
 }
 
 bool StrokeManager::SetStrokePath(StrokePtr stroke,
@@ -31,6 +48,37 @@ bool StrokeManager::SetStrokePath(StrokePtr stroke,
     dirty_stroke_groups_.insert(group);
   }
   return true;
+}
+
+bool StrokeManager::BeginStroke(StrokePtr stroke, glm::vec2 pt) {
+  auto group_it = stroke_to_group_map_.find(stroke);
+  if (group_it != stroke_to_group_map_.end()) {
+    auto group = group_it->second;
+    group->SetNeedsReTessellation();
+    dirty_stroke_groups_.insert(group);
+  }
+  return stroke->Begin(pt);
+}
+
+bool StrokeManager::ExtendStroke(StrokePtr stroke,
+                                 std::vector<glm::vec2> sampled_pts) {
+  auto group_it = stroke_to_group_map_.find(stroke);
+  if (group_it != stroke_to_group_map_.end()) {
+    auto group = group_it->second;
+    group->SetNeedsReTessellation();
+    dirty_stroke_groups_.insert(group);
+  }
+  return stroke->Extend(sampled_pts);
+}
+
+bool StrokeManager::FinishStroke(StrokePtr stroke) {
+  auto group_it = stroke_to_group_map_.find(stroke);
+  if (group_it != stroke_to_group_map_.end()) {
+    auto group = group_it->second;
+    group->SetNeedsReTessellation();
+    dirty_stroke_groups_.insert(group);
+  }
+  return stroke->Finish();
 }
 
 void StrokeManager::Update(Frame* frame) {

@@ -8,6 +8,8 @@
 #include "timer.h"
 #include "wlan.h"
 
+#include "garnet/drivers/wlan/common/channel.h"
+
 #include <fbl/limits.h>
 #include <zircon/assert.h>
 #include <zircon/compiler.h>
@@ -46,12 +48,6 @@ zx_status_t Device::Bind() __TA_NO_THREAD_SAFETY_ANALYSIS {
     zx_status_t status = zx::port::create(0, &port_);
     if (status != ZX_OK) {
         errorf("could not create port: %d\n", status);
-        return status;
-    }
-
-    status = dispatcher_.Init();
-    if (status != ZX_OK) {
-        errorf("could not initialize mlme: %d\n", status);
         return status;
     }
 
@@ -237,9 +233,7 @@ zx_status_t Device::SendWlan(fbl::unique_ptr<Packet> packet) {
         .data = packet->mut_data(),
         .len = static_cast<uint16_t>(packet->len()),
     };
-    wlan_tx_packet_t pkt = {
-        .packet_head = &netbuf
-    };
+    wlan_tx_packet_t pkt = {.packet_head = &netbuf};
     if (packet->has_ext_data()) {
         pkt.packet_tail = packet->ext_data();
         pkt.tail_offset = packet->ext_offset();
@@ -271,12 +265,19 @@ zx_status_t Device::SendService(fbl::unique_ptr<Packet> packet) __TA_NO_THREAD_S
 
 // TODO(tkilbourn): figure out how to make sure we have the lock for accessing dispatcher_.
 zx_status_t Device::SetChannel(wlan_channel_t chan) __TA_NO_THREAD_SAFETY_ANALYSIS {
-    debugf("%s chan=%u\n", __PRETTY_FUNCTION__, chan.channel_num);
-    if (chan.channel_num == state_->channel().channel_num) { return ZX_OK; }
+    debugf("%s chan=%s\n", __PRETTY_FUNCTION__, common::ChanStr(chan).c_str());
+
+    // TODO(porce): Implement == operator for wlan_channel_t, or an equality test function.
+    if (chan.primary == state_->channel().primary && chan.cbw == state_->channel().cbw) {
+        return ZX_OK;
+    }
 
     zx_status_t status = dispatcher_.PreChannelChange(chan);
     if (status != ZX_OK) { return status; }
     status = wlanmac_proxy_.SetChannel(0u, &chan);
+
+    // TODO(porce): Make it explicit when status != ZX_OK, how to recover from
+    // the actions of PreChannelChange().
     if (status == ZX_OK) { state_->set_channel(chan); }
     zx_status_t post_status = dispatcher_.PostChannelChange();
     if (status != ZX_OK) { return status; }
@@ -305,6 +306,10 @@ zx_status_t Device::SetKey(wlan_key_config_t* key_config) {
 
 fbl::RefPtr<DeviceState> Device::GetState() {
     return state_;
+}
+
+const wlanmac_info_t& Device::GetWlanInfo() const {
+    return wlanmac_info_;
 }
 
 void Device::MainLoop() {

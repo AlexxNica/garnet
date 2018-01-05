@@ -19,10 +19,15 @@
 // Material design places objects from 0.0f to 24.0f.
 static constexpr float kNear = 100.f;
 static constexpr float kFar = -1.f;
-static constexpr size_t kOffscreenBenchmarkFrameCount = 1000;
 
 // Directional light is 50% intensity; ambient light will adjust automatically.
 static constexpr float kLightIntensity = 0.5f;
+
+// Directional light parameters.
+static constexpr float kLightDispersion = M_PI * 0.15f;
+static constexpr float kLightElevationRadians = M_PI / 3.f;
+
+static constexpr size_t kOffscreenBenchmarkFrameCount = 1000;
 
 WaterfallDemo::WaterfallDemo(DemoHarness* harness, int argc, char** argv)
     : Demo(harness),
@@ -35,7 +40,7 @@ WaterfallDemo::WaterfallDemo(DemoHarness* harness, int argc, char** argv)
                         escher()->vulkan_context().device,
                         escher()->vulkan_context().queue) {
   ProcessCommandLineArgs(argc, argv);
-  InitializeEscherStage();
+  InitializeEscherStage(harness->GetWindowParams());
   InitializeDemoScenes();
 }
 
@@ -72,13 +77,13 @@ void WaterfallDemo::ProcessCommandLineArgs(int argc, char** argv) {
   }
 }
 
-void WaterfallDemo::InitializeEscherStage() {
+void WaterfallDemo::InitializeEscherStage(const DemoHarness::WindowParams& window_params) {
   stage_.set_viewing_volume(
-      escher::ViewingVolume(kDemoWidth, kDemoHeight, kNear, kFar));
-  // TODO: perhaps lights should be initialized by the various demo scenes.
-  stage_.set_key_light(escher::DirectionalLight(
-      escher::vec2(1.5f * M_PI, 1.5f * M_PI), 0.15f * M_PI, 0.7f));
-  stage_.set_fill_light(escher::AmbientLight(0.3f));
+      escher::ViewingVolume(window_params.width, window_params.height, kNear, kFar));
+  stage_.set_key_light(
+      escher::DirectionalLight(escher::vec2(1.5f * M_PI, 1.5f * M_PI),
+                               0.15f * M_PI, vec3(kLightIntensity)));
+  stage_.set_fill_light(escher::AmbientLight(1.f - kLightIntensity));
 }
 
 void WaterfallDemo::InitializeDemoScenes() {
@@ -229,7 +234,6 @@ void WaterfallDemo::DrawFrame() {
 
   renderer_->set_show_debug_info(show_debug_info_);
   renderer_->set_sort_by_pipeline(sort_by_pipeline_);
-  renderer_->set_enable_profiling(profile_one_frame_);
   renderer_->set_enable_ssdo_acceleration(enable_ssdo_acceleration_);
   switch (shadow_mode_) {
     case ShadowMode::kNone:
@@ -246,7 +250,6 @@ void WaterfallDemo::DrawFrame() {
       shadow_mode_ = ShadowMode::kNone;
       renderer_->set_shadow_type(escher::PaperRendererShadowType::kNone);
   }
-  profile_one_frame_ = false;
 
   escher::Camera camera =
       GenerateCamera(camera_projection_mode_, stage_.viewing_volume());
@@ -260,11 +263,10 @@ void WaterfallDemo::DrawFrame() {
         kDemoWidth, kDemoHeight, swapchain_helper_.swapchain().format,
         kOffscreenBenchmarkFrameCount,
         [this, model, &camera, overlay_model](
-            const escher::ImagePtr& color_image_out,
-            const escher::SemaphorePtr& frame_done_semaphore) {
-          renderer_->DrawFrame(stage_, *model, camera, color_image_out,
-                               escher::ShadowMapPtr(), overlay_model,
-                               frame_done_semaphore, nullptr);
+            const escher::FramePtr& frame,
+            const escher::ImagePtr& color_image_out) {
+          renderer_->DrawFrame(frame, stage_, *model, camera, color_image_out,
+                               escher::ShadowMapPtr(), overlay_model);
         });
     renderer_->set_show_debug_info(show_debug_info_);
     if (!stop_time_) {
@@ -278,15 +280,28 @@ void WaterfallDemo::DrawFrame() {
     stopwatch_.Start();
   }
 
+  if (animate_light_) {
+    light_azimuth_radians_ += 0.02;
+  }
+  vec3 light_direction = glm::normalize(vec3(-cos(light_azimuth_radians_),
+                                             -sin(light_azimuth_radians_),
+                                             -tan(kLightElevationRadians)));
+
+  stage_.set_key_light(escher::DirectionalLight(
+      escher::vec2(light_azimuth_radians_, kLightElevationRadians),
+      kLightDispersion, vec3(kLightIntensity)));
+
+  auto frame = escher()->NewFrame("Waterfall Demo", profile_one_frame_);
+
   escher::ShadowMapPtr shadow_map;
   if (shadow_mode_ == kShadowMap) {
     const vec3 directional_light_color(kLightIntensity);
     renderer_->set_ambient_light_color(vec3(1.f) - directional_light_color);
     shadow_map = shadow_renderer_->GenerateDirectionalShadowMap(
-        stage_, *model, vec3(0.3f, 0.3f, -1.f), directional_light_color);
+        frame, stage_, *model, light_direction, directional_light_color);
   }
 
-  swapchain_helper_.DrawFrame(renderer_.get(), stage_, *model, camera,
+  swapchain_helper_.DrawFrame(frame, renderer_.get(), stage_, *model, camera,
                               shadow_map, overlay_model);
 
   if (++frame_count_ == 1) {
@@ -303,6 +318,8 @@ void WaterfallDemo::DrawFrame() {
     FXL_LOG(INFO) << "---- Average frame rate: " << fps;
     FXL_LOG(INFO) << "---- Total GPU memory: "
                   << (escher()->GetNumGpuBytesAllocated() / 1024) << "kB";
+  } else {
+    profile_one_frame_ = false;
   }
 }
 

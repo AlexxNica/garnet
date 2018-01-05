@@ -16,6 +16,7 @@
 #include <zircon/syscalls/hypervisor.h>
 
 #include "garnet/lib/machina/address.h"
+#include "lib/fxl/logging.h"
 
 // clang-format off
 
@@ -52,11 +53,11 @@ zx_status_t IoApic::RegisterLocalApic(uint8_t local_apic_id,
                                       LocalApic* local_apic) {
   if (local_apic_id >= kMaxLocalApics)
     return ZX_ERR_OUT_OF_RANGE;
-  if (local_apic_[local_apic_id] != nullptr)
+  if (local_apics_[local_apic_id] != nullptr)
     return ZX_ERR_ALREADY_EXISTS;
 
   local_apic->set_id(local_apic_id);
-  local_apic_[local_apic_id] = local_apic;
+  local_apics_[local_apic_id] = local_apic;
   return ZX_OK;
 }
 
@@ -68,7 +69,7 @@ zx_status_t IoApic::SetRedirect(uint32_t global_irq, RedirectEntry& redirect) {
   return ZX_OK;
 }
 
-zx_status_t IoApic::Interrupt(uint32_t global_irq) const {
+zx_status_t IoApic::Interrupt(uint32_t global_irq) {
   if (global_irq >= kNumRedirects)
     return ZX_ERR_OUT_OF_RANGE;
 
@@ -95,7 +96,7 @@ zx_status_t IoApic::Interrupt(uint32_t global_irq) const {
   uint32_t destmod = bit_shift(entry.lower, 11);
   if (destmod == IO_APIC_DESTMOD_PHYSICAL) {
     uint32_t dest = bits_shift(entry.upper, 27, 24);
-    LocalApic* local_apic = dest < kMaxLocalApics ? local_apic_[dest] : nullptr;
+    LocalApic* local_apic = dest < kMaxLocalApics ? local_apics_[dest] : nullptr;
     if (local_apic == nullptr)
       return ZX_ERR_NOT_FOUND;
     return local_apic->Interrupt(vector);
@@ -105,7 +106,7 @@ zx_status_t IoApic::Interrupt(uint32_t global_irq) const {
   uint32_t dest = bits_shift(entry.upper, 31, 24);
   for (uint8_t local_apic_id = 0; local_apic_id < kMaxLocalApics;
        ++local_apic_id) {
-    LocalApic* local_apic = local_apic_[local_apic_id];
+    LocalApic* local_apic = local_apics_[local_apic_id];
     if (local_apic == nullptr)
       continue;
 
@@ -118,7 +119,7 @@ zx_status_t IoApic::Interrupt(uint32_t global_irq) const {
     // There also exists a 'cluster' model that is not implemented.
     uint32_t model = bits_shift(local_apic->dfr(), 31, 28);
     if (model != LOCAL_APIC_DFR_FLAT_MODEL) {
-      fprintf(stderr, "APIC only supports the flat model.\n");
+      FXL_LOG(ERROR) << "APIC only supports the flat model.";
       return ZX_ERR_NOT_SUPPORTED;
     }
 
@@ -146,7 +147,7 @@ zx_status_t IoApic::Read(uint64_t addr, IoValue* value) const {
       return ReadRegister(select_register, value);
     }
     default:
-      fprintf(stderr, "Unhandled IO APIC address %#lx\n", addr);
+      FXL_LOG(ERROR) << "Unhandled IO APIC read 0x" << std::hex << addr;
       return ZX_ERR_NOT_SUPPORTED;
   }
 }
@@ -169,7 +170,7 @@ zx_status_t IoApic::Write(uint64_t addr, const IoValue& value) {
       return WriteRegister(select_register, value);
     }
     default:
-      fprintf(stderr, "Unhandled IO APIC address %#lx\n", addr);
+      FXL_LOG(ERROR) << "Unhandled IO APIC write 0x" << std::hex << addr;
       return ZX_ERR_NOT_SUPPORTED;
   }
 }
@@ -204,7 +205,7 @@ zx_status_t IoApic::ReadRegister(uint32_t select_register,
       return ZX_OK;
     }
     default:
-      fprintf(stderr, "Unhandled IO APIC register %#x\n", select_register);
+      FXL_LOG(ERROR) << "Unhandled IO APIC register read 0x" << std::hex << select_register;
       return ZX_ERR_NOT_SUPPORTED;
   }
 }
@@ -231,7 +232,8 @@ zx_status_t IoApic::WriteRegister(uint32_t select_register,
       // Read-only, ignore writes.
       return ZX_OK;
     default:
-      fprintf(stderr, "Unhandled IO APIC register %#x\n", select_register);
+      FXL_LOG(ERROR) <<
+          "Unhandled IO APIC register write 0x" << std::hex << select_register;
       return ZX_ERR_NOT_SUPPORTED;
   }
 }

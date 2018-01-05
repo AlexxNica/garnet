@@ -10,9 +10,8 @@ authors = ["Taylor Cramer <cramertj@google.com>"]
 description = "Example of an echo client Fuchsia app in Rust"
 
 [dependencies]
+fidl = "0.1.0"
+fuchsia-app = "0.1.0"
 futures = "0.1.15"
+garnet_examples_fidl_services = "0.1.0"
 tokio-core = "0.1"
-
-[profile.release]
-lto = true
-panic = 'abort'

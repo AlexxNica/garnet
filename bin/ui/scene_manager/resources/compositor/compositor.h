@@ -2,18 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef GARNET_BIN_UI_SCENE_MANAGER_RESOURCES_COMPOSITOR_COMPOSITOR_H_
+#define GARNET_BIN_UI_SCENE_MANAGER_RESOURCES_COMPOSITOR_COMPOSITOR_H_
 
-#include "garnet/bin/ui/scene_manager/swapchain/swapchain.h"
 #include "garnet/bin/ui/scene_manager/resources/resource.h"
+#include "garnet/bin/ui/scene_manager/swapchain/swapchain.h"
 
 namespace escher {
 class Escher;
+class Frame;
 class Image;
 class Model;
 class PaperRenderer;
 class Semaphore;
+class ShadowMapRenderer;
 class Stage;
+using FramePtr = fxl::RefPtr<Frame>;
 using ImagePtr = fxl::RefPtr<Image>;
 using SemaphorePtr = fxl::RefPtr<Semaphore>;
 }  // namespace escher
@@ -46,8 +50,11 @@ class Compositor : public Resource {
   // Determine the appropriate order to render all layers, and then combine them
   // into a single output image.  Subclasses determine how to obtain and present
   // the output image.
-  void DrawFrame(const FrameTimingsPtr& frame_timings,
-                 escher::PaperRenderer* renderer);
+  //
+  // Returns true if at least one layer is drawn.
+  bool DrawFrame(const FrameTimingsPtr& frame_timings,
+                 escher::PaperRenderer* renderer,
+                 escher::ShadowMapRenderer* shadow_renderer);
 
  protected:
   escher::Escher* escher() const { return escher_; }
@@ -60,11 +67,11 @@ class Compositor : public Resource {
  private:
   escher::ImagePtr GetLayerFramebufferImage(uint32_t width, uint32_t height);
 
-  void InitStage(escher::Stage* stage, uint32_t width, uint32_t height);
-  void DrawLayer(escher::PaperRenderer* escher_renderer,
+  void DrawLayer(const escher::FramePtr& frame,
+                 escher::PaperRenderer* escher_renderer,
+                 escher::ShadowMapRenderer* shadow_renderer,
                  Layer* layer,
                  const escher::ImagePtr& output_image,
-                 const escher::SemaphorePtr& frame_done_semaphore,
                  const escher::Model* overlay_model);
 
   escher::Escher* const escher_;
@@ -75,3 +82,5 @@ class Compositor : public Resource {
 };
 
 }  // namespace scene_manager
+
+#endif  // GARNET_BIN_UI_SCENE_MANAGER_RESOURCES_COMPOSITOR_COMPOSITOR_H_

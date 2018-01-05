@@ -2916,16 +2916,26 @@ static uint8_t ddk_phy_to_ralink_phy(uint16_t ddk_phy) {
     case WLAN_PHY_HT_GREENFIELD:
         return PhyMode::kHtGreenfield;
     default:
-        warnf("invalid DDK phy: %u\n", ddk_phy);
-        return PhyMode::kUnknown;
+        warnf("invalid DDK phy: %u. Fallback to PHY_OFDM\n", ddk_phy);
+        return PhyMode::kLegacyOfdm;
     }
+}
+
+static uint8_t mcs_to_ralink_mcs(uint8_t vendor_phy_mode, uint8_t mcs) {
+    // TODO(porce): Translate Rate index in each phy to ralink MCS values
+    // For LegacyOFDM:
+    // Standard MCS index: 13, 16, 5, 7, 9, 11, 1, 3 map to 6, 9, 12, 18, 24, 36, 48, 54 Mbps
+    // which in turns maps to Ralink MCS index: 0, 1, 2, 3, 4, 5, 6, 7.
+
+    // For CCK,
+    // Ralink supports 0 to 3, mapping to 1, 2, 5.5, 11 Mbps, for long preamble.
+    // Add value 8 to mcs index for short preamble.
+    return mcs;
 }
 
 static void fill_rx_info(wlan_rx_info_t* info, RxDesc rx_desc, Rxwi1 rxwi1, Rxwi2 rxwi2,
                          Rxwi3 rxwi3, uint8_t* rssi_offsets, uint8_t lna_gain) {
-    if (rx_desc.l2pad()) {
-        info->rx_flags |= WLAN_RX_INFO_FLAGS_FRAME_BODY_PADDING_4;
-    }
+    if (rx_desc.l2pad()) { info->rx_flags |= WLAN_RX_INFO_FLAGS_FRAME_BODY_PADDING_4; }
     info->valid_fields |= WLAN_RX_INFO_VALID_PHY;
     info->phy = ralink_phy_to_ddk_phy(rxwi1.phy_mode());
 
@@ -2936,7 +2946,8 @@ static void fill_rx_info(wlan_rx_info_t* info, RxDesc rx_desc, Rxwi1 rxwi1, Rxwi
     }
 
     info->valid_fields |= WLAN_RX_INFO_VALID_CHAN_WIDTH;
-    info->chan_width = rxwi1.bw() ? WLAN_CHAN_WIDTH_40MHZ : WLAN_CHAN_WIDTH_20MHZ;
+    // TODO(porce): Study how to distinguish CBW40ABOVE from CBW40BELOW, from rxwi.
+    info->chan.cbw = rxwi1.bw() ? CBW40 : CBW20;
 
     uint8_t phy_mode = rxwi1.phy_mode();
     bool is_ht = phy_mode == PhyMode::kHtMixMode || phy_mode == PhyMode::kHtGreenfield;
@@ -2996,7 +3007,7 @@ void Device::HandleRxComplete(usb_request_t* request) {
         if (wlanmac_proxy_ != nullptr) {
             wlan_rx_info_t wlan_rx_info = {};
             fill_rx_info(&wlan_rx_info, rx_desc, rxwi1, rxwi2, rxwi3, bg_rssi_offset_, lna_gain_);
-            wlan_rx_info.chan.channel_num = current_channel_;
+            wlan_rx_info.chan.primary = current_channel_;
             wlanmac_proxy_->Recv(0u, data + rx_hdr_size, rxwi0.mpdu_total_byte_count(),
                                  &wlan_rx_info);
         }
@@ -3036,8 +3047,8 @@ zx_status_t Device::WlanmacQuery(uint32_t options, wlanmac_info_t* info) {
     std::memcpy(info->eth_info.mac, mac_addr_, ETH_MAC_SIZE);
     info->eth_info.features |= ETHMAC_FEATURE_WLAN;
 
-    info->supported_phys = WLAN_PHY_DSSS | WLAN_PHY_CCK | WLAN_PHY_OFDM | WLAN_PHY_HT_MIXED |
-        WLAN_PHY_HT_GREENFIELD;
+    info->supported_phys =
+        WLAN_PHY_DSSS | WLAN_PHY_CCK | WLAN_PHY_OFDM | WLAN_PHY_HT_MIXED | WLAN_PHY_HT_GREENFIELD;
     // TODO(tkilbourn): update this when we add AP support
     info->mac_modes = WLAN_MAC_MODE_STA;
     info->caps = WLAN_CAP_SHORT_PREAMBLE | WLAN_CAP_SHORT_SLOT_TIME;
@@ -3046,48 +3057,65 @@ zx_status_t Device::WlanmacQuery(uint32_t options, wlanmac_info_t* info) {
         .desc = "2.4 GHz",
         // TODO(tkilbourn): verify these
         // (*) represents a property to verify later
-        .ht_caps = {
-            // - No LDPC
-            // - Both 20 and 40 MHz operation
-            // - static SM power save mode
-            // - HT greenfield
-            // - short guard interval for 20 MHz
-            // - short guard interval for 40 MHz
-            // - Tx with STBC
-            // - Rx with STBC for one spatial stream
-            // - no delayed Block Ack (*)
-            // - Max A-MSDU is 3839 (*)
-            // - Does not use DSSS/CCK in 40 MHz (*)
-            // - Not 40MHz intolerant
-            // - No L-SIG TXOP protection (*)
-            .ht_capability_info = 0x01fe,
-            // - Max A-MPDU length 8191 (*)
-            // - No restriction on MPDU start spacing (*)
-            .ampdu_params = 0x00,
-            .supported_mcs_set = {
-                // Rx MCS bitmask
-                // Supported MCS values: 0-7, 32
-                0xff, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                // Tx parameters
-                // - Tx MCS set defined
-                // - Tx and Rx MCS set equal
-                // - Other fields set to zero due to the first two
-                0x01, 0x00, 0x00, 0x00,
+        .ht_caps =
+            {
+                // - No LDPC
+                // - Both 20 and 40 MHz operation
+                // - static SM power save mode
+                // - HT greenfield
+                // - short guard interval for 20 MHz
+                // - short guard interval for 40 MHz
+                // - Tx with STBC
+                // - Rx with STBC for one spatial stream
+                // - no delayed Block Ack (*)
+                // - Max A-MSDU is 3839 (*)
+                // - Does not use DSSS/CCK in 40 MHz (*)
+                // - Not 40MHz intolerant
+                // - No L-SIG TXOP protection (*)
+                .ht_capability_info = 0x01fe,
+                // - Max A-MPDU length 8191 (*)
+                // - No restriction on MPDU start spacing (*)
+                .ampdu_params = 0x00,
+                .supported_mcs_set =
+                    {
+                        // Rx MCS bitmask
+                        // Supported MCS values: 0-7, 32
+                        0xff,
+                        0x00,
+                        0x00,
+                        0x80,
+                        0x00,
+                        0x00,
+                        0x00,
+                        0x00,
+                        0x00,
+                        0x00,
+                        0x00,
+                        0x00,
+                        // Tx parameters
+                        // - Tx MCS set defined
+                        // - Tx and Rx MCS set equal
+                        // - Other fields set to zero due to the first two
+                        0x01,
+                        0x00,
+                        0x00,
+                        0x00,
+                    },
+                // No ext capabilities (PCO, MCS feedback, HT control, RD responder)
+                .ht_ext_capabilities = 0x0000,
+                // No Tx beamforming
+                .tx_beamforming_capabilities = 0x00000000,
+                // No antenna selection
+                .asel_capabilities = 0x00,
             },
-            // No ext capabilities (PCO, MCS feedback, HT control, RD responder)
-            .ht_ext_capabilities = 0x0000,
-            // No Tx beamforming
-            .tx_beamforming_capabilities = 0x00000000,
-            // No antenna selection
-            .asel_capabilities = 0x00,
-        },
         .vht_supported = false,
         .vht_caps = {},
-        .basic_rates = { 2, 4, 11, 22, 12, 18, 24, 36, 48, 72, 96, 108 },
-        .supported_channels = {
-            .base_freq = 2417,
-            .channels = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 },
-        },
+        .basic_rates = {2, 4, 11, 22, 12, 18, 24, 36, 48, 72, 96, 108},
+        .supported_channels =
+            {
+                .base_freq = 2417,
+                .channels = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14},
+            },
     };
     if (rt_type_ == RT5592) {
         info->num_bands = 2;
@@ -3096,31 +3124,50 @@ zx_status_t Device::WlanmacQuery(uint32_t options, wlanmac_info_t* info) {
         info->bands[1] = {
             .desc = "5 GHz",
             // See above for descriptions of these capabilities
-            .ht_caps = {
-                .ht_capability_info = 0x01fe,
-                .ampdu_params = 0x00,
-                .supported_mcs_set = {
-                    // Rx MCS bitmask
-                    // Supported MCS values: 0-15, 32
-                    0xff, 0xff, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    // Tx parameters
-                    0x01, 0x00, 0x00, 0x00,
+            .ht_caps =
+                {
+                    .ht_capability_info = 0x01fe,
+                    .ampdu_params = 0x00,
+                    .supported_mcs_set =
+                        {
+                            // Rx MCS bitmask
+                            // Supported MCS values: 0-15, 32
+                            0xff,
+                            0xff,
+                            0x00,
+                            0x80,
+                            0x00,
+                            0x00,
+                            0x00,
+                            0x00,
+                            0x00,
+                            0x00,
+                            0x00,
+                            0x00,
+                            // Tx parameters
+                            0x01,
+                            0x00,
+                            0x00,
+                            0x00,
+                        },
+                    .ht_ext_capabilities = 0x0000,
+                    .tx_beamforming_capabilities = 0x00000000,
+                    .asel_capabilities = 0x00,
                 },
-                .ht_ext_capabilities = 0x0000,
-                .tx_beamforming_capabilities = 0x00000000,
-                .asel_capabilities = 0x00,
-            },
             .vht_supported = false,
             .vht_caps = {},
-            .basic_rates = { 12, 18, 24, 36, 48, 72, 96, 108 },
-            .supported_channels = {
-                .base_freq = 5000,
-                .channels = {
-                    36, 38, 40, 42, 44, 46, 48, 50, 52, 54, 56, 58, 60, 62, 64, 100, 102, 104, 106,
-                    108, 110, 112, 114, 116, 118, 120, 122, 124, 126, 128, 130, 132, 134, 136, 138,
-                    140, 149, 151, 153, 155, 157, 159, 161, 165, 184, 188, 192, 196,
+            .basic_rates = {12, 18, 24, 36, 48, 72, 96, 108},
+            .supported_channels =
+                {
+                    .base_freq = 5000,
+                    .channels =
+                        {
+                            36,  38,  40,  42,  44,  46,  48,  50,  52,  54,  56,  58,
+                            60,  62,  64,  100, 102, 104, 106, 108, 110, 112, 114, 116,
+                            118, 120, 122, 124, 126, 128, 130, 132, 134, 136, 138, 140,
+                            149, 151, 153, 155, 157, 159, 161, 165, 184, 188, 192, 196,
+                        },
                 },
-            },
         };
     }
 
@@ -3233,10 +3280,9 @@ zx_status_t Device::WlanmacStart(fbl::unique_ptr<ddk::WlanmacIfcProxy> proxy) {
 
     wlanmac_proxy_.swap(proxy);
 
-    // For now, set the channel at startup just to get some packets flowing
-    // TODO(tkilbourn): remove this
     wlan_channel_t chan;
-    chan.channel_num = 1;
+    chan.primary = 1;
+    chan.cbw = CBW20;
     status = WlanmacSetChannel(0, &chan);
     if (status != ZX_OK) { warnf("could not set channel err=%d\n", status); }
 
@@ -3316,7 +3362,8 @@ zx_status_t Device::WlanmacQueueTx(uint32_t options, wlan_tx_packet_t* pkt) {
     packet->tx_info.set_tx_pkt_length(txwi_len + len + align_pad_len);
 
     // TODO(tkilbourn): set these more appropriately
-    uint8_t wiv = !(pkt->info.tx_flags & WLAN_TX_INFO_FLAGS_PROTECTED);
+    const bool protected_frame = (pkt->info.tx_flags & WLAN_TX_INFO_FLAGS_PROTECTED);
+    uint8_t wiv = !protected_frame;
     packet->tx_info.set_wiv(wiv);
     packet->tx_info.set_qsel(2);
 
@@ -3331,37 +3378,33 @@ zx_status_t Device::WlanmacQueueTx(uint32_t options, wlan_tx_packet_t* pkt) {
     // txwi0.set_mpdu_density(Txwi0::kEightUsec);  // TP-Link
     txwi0.set_txop(Txwi0::kHtTxop);
 
-    uint8_t mcs = kMaxOfdmMcs;  // this is the same as the max HT mcs
-    if (pkt->info.valid_fields & WLAN_TX_INFO_VALID_MCS) {
-        // TODO(tkilbourn): define an 802.11-to-Ralink mcs translator
-    }
-    txwi0.set_mcs(mcs);
-
-    if (pkt->info.valid_fields & WLAN_TX_INFO_VALID_CHAN_WIDTH &&
-        pkt->info.chan_width == WLAN_CHAN_WIDTH_40MHZ) {
-        txwi0.set_bw(1);  // for 40 Mhz
-    } else {
-        txwi0.set_bw(0);  // for 20 Mhz
-    }
-    txwi0.set_sgi(1);
-    txwi0.set_stbc(0);  // TODO(porce): Define the value.
-
-    uint8_t phy_mode = PhyMode::kUnknown;
+    uint8_t phy_mode = ddk_phy_to_ralink_phy(WLAN_PHY_OFDM);  // Default
     if (pkt->info.valid_fields & WLAN_TX_INFO_VALID_PHY) {
         phy_mode = ddk_phy_to_ralink_phy(pkt->info.phy);
     }
-    if (phy_mode != PhyMode::kUnknown) {
-        txwi0.set_phy_mode(phy_mode);
-    } else {
-        txwi0.set_phy_mode(PhyMode::kLegacyOfdm);
-    }
+    txwi0.set_phy_mode(phy_mode);
 
-    // TODO(porce): Incorporate this into pkt->info
-    txwi0.set_phy_mode(PhyMode::kHtMixMode);
+    uint8_t mcs = kMaxOfdmMcs;  // this is the same as the max HT mcs
+    if (pkt->info.valid_fields & WLAN_TX_INFO_VALID_MCS) {
+        mcs = mcs_to_ralink_mcs(phy_mode, pkt->info.mcs);
+    }
+    txwi0.set_mcs(mcs);
+
+    uint8_t cbw = CBW20;
+    if (pkt->info.valid_fields & WLAN_TX_INFO_VALID_CHAN_WIDTH) {
+        cbw = pkt->info.cbw;
+        // TODO(porce): Investigate how to configure txwi differently
+        // for CBW40ABOVE and CBW40BELOW
+    }
+    txwi0.set_bw(cbw == CBW20 ? 0 : 1);
+
+    txwi0.set_sgi(1);
+    txwi0.set_stbc(0);  // TODO(porce): Define the value.
 
     // The frame header is always in the packet head.
-    auto wcid =
-        LookupTxWcid(static_cast<const uint8_t*>(pkt->packet_head->data), pkt->packet_head->len);
+    auto frame = static_cast<const uint8_t*>(pkt->packet_head->data);
+    auto addr1 = frame + 4;  // 4 = FC + Duration fields
+    auto wcid = LookupTxWcid(addr1, protected_frame);
     Txwi1& txwi1 = packet->txwi1;
     txwi1.set_ack(0);
     txwi1.set_nseq(0);
@@ -3395,19 +3438,13 @@ zx_status_t Device::WlanmacQueueTx(uint32_t options, wlan_tx_packet_t* pkt) {
     return ZX_OK;
 }
 
-bool Device::RequiresProtection(const uint8_t* frame, size_t len) {
-    // TODO(hahnr): Derive frame protection requirement from wlan_tx_info_t once available.
-    uint16_t fc = reinterpret_cast<const uint16_t*>(frame)[0];
-    return fc & (1 << 14);
-}
-
 // Looks up the WCID for addr1 in the frame. If no WCID was found, 255 is returned.
-// Note: This method must be evolved once multiple BSS are supported or the STA runs in AP mode and
-// uses hardware encryption.
-uint8_t Device::LookupTxWcid(const uint8_t* frame, size_t len) {
-    if (RequiresProtection(frame, len)) {
-        auto addr1 = frame + 4;  // 4 = FC + Duration fields
-        // TODO(hahnr): Replace addresses and constants with MacAddr once it was moved to common/.
+// Note: This method must be evolved once multiple BSS are supported or the STA runs in AP mode
+// and uses hardware encryption.
+uint8_t Device::LookupTxWcid(const uint8_t* addr1, bool protected_frame) {
+    if (protected_frame) {
+        // TODO(hahnr): Replace addresses and constants with MacAddr once it was moved to
+        // common/.
         if (memcmp(addr1, kBcastAddr, 6) == 0) {
             return kWcidBcastAddr;
         } else if (memcmp(addr1, bssid_, 6) == 0) {
@@ -3420,7 +3457,7 @@ uint8_t Device::LookupTxWcid(const uint8_t* frame, size_t len) {
 zx_status_t Device::WlanmacSetChannel(uint32_t options, wlan_channel_t* chan) {
     zx_status_t status;
     if (options != 0) { return ZX_ERR_INVALID_ARGS; }
-    auto channel = channels_.find(chan->channel_num);
+    auto channel = channels_.find(chan->primary);
     if (channel == channels_.end()) { return ZX_ERR_NOT_FOUND; }
     status = StopRxQueue();
     if (status != ZX_OK) {
@@ -3436,7 +3473,7 @@ zx_status_t Device::WlanmacSetChannel(uint32_t options, wlan_channel_t* chan) {
         errorf("could not start queues\n");
         return status;
     }
-    current_channel_ = chan->channel_num;
+    current_channel_ = chan->primary;
     return ZX_OK;
 }
 

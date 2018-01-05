@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef GARNET_BIN_UI_SCENE_MANAGER_RESOURCES_RESOURCE_VISITOR_H_
+#define GARNET_BIN_UI_SCENE_MANAGER_RESOURCES_RESOURCE_VISITOR_H_
 
 namespace scene_manager {
 
@@ -27,6 +28,8 @@ class Layer;
 class Camera;
 class Renderer;
 class Scene;
+class Light;
+class AmbientLight;
 class DirectionalLight;
 
 class ResourceVisitor {
@@ -60,6 +63,8 @@ class ResourceVisitor {
   virtual void Visit(Scene* r) = 0;
   virtual void Visit(Camera* r) = 0;
   virtual void Visit(Renderer* r) = 0;
+  virtual void Visit(Light* r) = 0;
+  virtual void Visit(AmbientLight* r) = 0;
   virtual void Visit(DirectionalLight* r) = 0;
 
   // Imported resources.
@@ -67,3 +72,5 @@ class ResourceVisitor {
 };
 
 }  // namespace scene_manager
+
+#endif  // GARNET_BIN_UI_SCENE_MANAGER_RESOURCES_RESOURCE_VISITOR_H_

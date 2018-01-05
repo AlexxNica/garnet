@@ -14,7 +14,7 @@
 #include "lib/fxl/memory/ref_ptr.h"
 #include "lib/fxl/tasks/task_runner.h"
 
-namespace bluetooth {
+namespace btlib {
 namespace att {
 
 // Defines the read or write access permissions for an attribute.
@@ -58,6 +58,8 @@ class AccessRequirements final {
   uint8_t value_;
 };
 
+class AttributeGrouping;
+
 // Represents an attribute. Each attribute is assigned a handle (unique within
 // the scope of an Adapter) and a UUID that identifies its type. The type of an
 // attribute dictates how to interpret the attribute value.
@@ -69,20 +71,15 @@ class AccessRequirements final {
 // Otherwise, an Attribute is considered dynamic and its value must be accessed
 // asynchronously by calling ReadAsync()/WriteAsync().
 //
+// Instances cannot be constructed directly and must be obtained from an
+// AttributeGrouping.
+//
 // THREAD-SAFETY:
 //
 // This class is not thread-safe. The constructor/destructor and all public
 // methods must be called on the same thread.
 class Attribute final {
  public:
-  Attribute(Handle handle,
-            const common::UUID& type,
-            const AccessRequirements& read_reqs,
-            const AccessRequirements& write_reqs);
-
-  // The default constructor will construct this attribute as uninitialized.
-  Attribute();
-
   // Allow move construction and assignment.
   Attribute(Attribute&& other) = default;
   Attribute& operator=(Attribute&& other) = default;
@@ -92,8 +89,11 @@ class Attribute final {
   Handle handle() const { return handle_; }
   const common::UUID& type() const { return type_; }
 
-  // Returns the current attribute value. Returns nullptr if no value was cached
-  // for this attribute (in which case this attribute is dynamic).
+  // The grouping that this attribute belongs to.
+  const AttributeGrouping& group() const { return *group_; }
+
+  // Returns the current attribute value. Returns nullptr if the attribute has a
+  // dynamic value.
   const common::ByteBuffer* value() const {
     return value_.size() ? &value_ : nullptr;
   }
@@ -102,7 +102,7 @@ class Attribute final {
   const AccessRequirements& read_reqs() const { return read_reqs_; }
   const AccessRequirements& write_reqs() const { return write_reqs_; }
 
-  // Sets |value| as the cached attribute value. Once a value is assigned it
+  // Sets |value| as the static attribute value. Once a value is assigned it
   // cannot be overwritten. A static value cannot be assigned to an attribute
   // that permits writes as attribute writes need to propagate to the service
   // layer.
@@ -143,6 +143,19 @@ class Attribute final {
                   const WriteResultCallback& result_callback) const;
 
  private:
+  // Only an AttributeGrouping can construct this.
+  friend class AttributeGrouping;
+
+  // The default constructor will construct this attribute as uninitialized.
+  // This is intended for STL containers.
+  Attribute();
+  Attribute(AttributeGrouping* group,
+            Handle handle,
+            const common::UUID& type,
+            const AccessRequirements& read_reqs,
+            const AccessRequirements& write_reqs);
+
+  AttributeGrouping* group_;  // The group that owns this Attribute.
   Handle handle_;
   common::UUID type_;
   AccessRequirements read_reqs_;
@@ -184,9 +197,10 @@ class AttributeGrouping final {
   //
   // The caller should not hold on to the returned pointer as the Attribute
   // object is owned and managed by this AttributeGrouping.
-  Attribute* AddAttribute(const common::UUID& type,
-                          const AccessRequirements& read_reqs,
-                          const AccessRequirements& write_reqs);
+  Attribute* AddAttribute(
+      const common::UUID& type,
+      const AccessRequirements& read_reqs = AccessRequirements(),
+      const AccessRequirements& write_reqs = AccessRequirements());
 
   // Returns true if all attributes of this grouping have been populated.
   bool complete() const {
@@ -235,4 +249,4 @@ class AttributeGrouping final {
 };
 
 }  // namespace att
-}  // namespace bluetooth
+}  // namespace btlib

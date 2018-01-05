@@ -1,0 +1,574 @@
+// Copyright 2017 The Fuchsia Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+#include "server.h"
+
+#include <fbl/function.h>
+
+#include "garnet/drivers/bluetooth/lib/att/database.h"
+#include "garnet/drivers/bluetooth/lib/common/slab_allocator.h"
+#include "garnet/drivers/bluetooth/lib/common/uuid.h"
+#include "lib/fxl/logging.h"
+
+#include "gatt.h"
+
+namespace btlib {
+namespace gatt {
+namespace {
+
+// TODO(armansito): Compare against the actual connection security level. For
+// now, we return an error if any security is required.
+att::ErrorCode CheckSecurity(const att::AccessRequirements& reqs,
+                             bool read_or_write) {
+  if (!reqs.allowed()) {
+    return read_or_write ? att::ErrorCode::kReadNotPermitted
+                         : att::ErrorCode::kWriteNotPermitted;
+  }
+
+  if (reqs.encryption_required()) {
+    return att::ErrorCode::kInsufficientEncryption;
+  }
+
+  // TODO(armansito): If authentication is required, then so is encryption. The
+  // error reporting should reflect that. We may also want to consider
+  // collapsing the three separate security levels down to one that includes all
+  // (at least at FIDL level).
+  if (reqs.authentication_required()) {
+    return att::ErrorCode::kInsufficientAuthentication;
+  }
+
+  if (reqs.authorization_required()) {
+    return att::ErrorCode::kInsufficientAuthorization;
+  }
+
+  // TODO(armansito): Handle kInsufficientEncryptionSize.
+
+  return att::ErrorCode::kNoError;
+}
+
+}  // namespace
+
+Server::Server(fxl::RefPtr<att::Database> database,
+               fxl::RefPtr<att::Bearer> bearer)
+    : db_(database), att_(bearer), weak_ptr_factory_(this) {
+  FXL_DCHECK(db_);
+  FXL_DCHECK(att_);
+
+  exchange_mtu_id_ = att_->RegisterHandler(
+      att::kExchangeMTURequest, fbl::BindMember(this, &Server::OnExchangeMTU));
+  find_information_id_ =
+      att_->RegisterHandler(att::kFindInformationRequest,
+                            fbl::BindMember(this, &Server::OnFindInformation));
+  read_by_group_type_id_ =
+      att_->RegisterHandler(att::kReadByGroupTypeRequest,
+                            fbl::BindMember(this, &Server::OnReadByGroupType));
+  read_by_type_id_ = att_->RegisterHandler(
+      att::kReadByTypeRequest, fbl::BindMember(this, &Server::OnReadByType));
+  read_req_id_ = att_->RegisterHandler(
+      att::kReadRequest, fbl::BindMember(this, &Server::OnReadRequest));
+  write_req_id_ = att_->RegisterHandler(
+      att::kWriteRequest, fbl::BindMember(this, &Server::OnWriteRequest));
+}
+
+Server::~Server() {
+  att_->UnregisterHandler(write_req_id_);
+  att_->UnregisterHandler(read_req_id_);
+  att_->UnregisterHandler(read_by_type_id_);
+  att_->UnregisterHandler(read_by_group_type_id_);
+  att_->UnregisterHandler(find_information_id_);
+  att_->UnregisterHandler(exchange_mtu_id_);
+}
+
+void Server::OnExchangeMTU(att::Bearer::TransactionId tid,
+                           const att::PacketReader& packet) {
+  FXL_DCHECK(packet.opcode() == att::kExchangeMTURequest);
+
+  if (packet.payload_size() != sizeof(att::ExchangeMTURequestParams)) {
+    att_->ReplyWithError(tid, att::kInvalidHandle, att::ErrorCode::kInvalidPDU);
+    return;
+  }
+
+  const auto& params = packet.payload<att::ExchangeMTURequestParams>();
+  uint16_t client_mtu = le16toh(params.client_rx_mtu);
+  uint16_t server_mtu = att_->preferred_mtu();
+
+  auto buffer = common::NewSlabBuffer(sizeof(att::Header) +
+                                      sizeof(att::ExchangeMTURequestParams));
+  FXL_CHECK(buffer);
+
+  att::PacketWriter writer(att::kExchangeMTUResponse, buffer.get());
+  auto rsp_params = writer.mutable_payload<att::ExchangeMTUResponseParams>();
+  rsp_params->server_rx_mtu = htole16(server_mtu);
+
+  att_->Reply(tid, std::move(buffer));
+
+  // If the minimum value is less than the default MTU, then go with the default
+  // MTU (Vol 3, Part F, 3.4.2.2).
+  // TODO(armansito): This needs to use on kBREDRMinATTMTU for BR/EDR. Make the
+  // default MTU configurable.
+  att_->set_mtu(std::max(att::kLEMinMTU, std::min(client_mtu, server_mtu)));
+}
+
+void Server::OnFindInformation(att::Bearer::TransactionId tid,
+                               const att::PacketReader& packet) {
+  FXL_DCHECK(packet.opcode() == att::kFindInformationRequest);
+
+  if (packet.payload_size() != sizeof(att::FindInformationRequestParams)) {
+    att_->ReplyWithError(tid, att::kInvalidHandle, att::ErrorCode::kInvalidPDU);
+    return;
+  }
+
+  const auto& params = packet.payload<att::FindInformationRequestParams>();
+  att::Handle start = le16toh(params.start_handle);
+  att::Handle end = le16toh(params.end_handle);
+
+  constexpr size_t kRspStructSize = sizeof(att::FindInformationResponseParams);
+  constexpr size_t kHeaderSize = sizeof(att::Header) + kRspStructSize;
+  FXL_DCHECK(kHeaderSize <= att_->mtu());
+
+  if (start == att::kInvalidHandle || start > end) {
+    att_->ReplyWithError(tid, start, att::ErrorCode::kInvalidHandle);
+    return;
+  }
+
+  // Find all attributes within range with the same compact UUID size that can
+  // fit within the current MTU.
+  size_t max_payload_size = att_->mtu() - kHeaderSize;
+  size_t uuid_size;
+  size_t entry_size;
+  std::list<const att::Attribute*> results;
+  for (auto it = db_->GetIterator(start, end); !it.AtEnd(); it.Advance()) {
+    const auto* attr = it.get();
+    FXL_DCHECK(attr);
+
+    // GATT does not allow 32-bit UUIDs
+    size_t compact_size = attr->type().CompactSize(false /* allow_32bit */);
+    if (results.empty()) {
+      // |uuid_size| is determined by the first attribute.
+      uuid_size = compact_size;
+      entry_size = std::min(uuid_size + sizeof(att::Handle), max_payload_size);
+    } else if (compact_size != uuid_size || entry_size > max_payload_size) {
+      break;
+    }
+
+    results.push_back(attr);
+    max_payload_size -= entry_size;
+  }
+
+  if (results.empty()) {
+    att_->ReplyWithError(tid, start, att::ErrorCode::kAttributeNotFound);
+    return;
+  }
+
+  FXL_DCHECK(!results.empty());
+
+  size_t pdu_size = kHeaderSize + entry_size * results.size();
+
+  auto buffer = common::NewSlabBuffer(pdu_size);
+  FXL_CHECK(buffer);
+
+  att::PacketWriter writer(att::kFindInformationResponse, buffer.get());
+  auto rsp_params =
+      writer.mutable_payload<att::FindInformationResponseParams>();
+  rsp_params->format =
+      (entry_size == 4) ? att::UUIDType::k16Bit : att::UUIDType::k128Bit;
+
+  // |out_entries| initially references |params->information_data|. The loop
+  // below modifies it as entries are written into the list.
+  auto out_entries = writer.mutable_payload_data().mutable_view(kRspStructSize);
+  for (const auto& attr : results) {
+    *reinterpret_cast<att::Handle*>(out_entries.mutable_data()) =
+        htole16(attr->handle());
+    auto uuid_view = out_entries.mutable_view(sizeof(att::Handle));
+    attr->type().ToBytes(&uuid_view, false /* allow32_bit */);
+
+    // advance
+    out_entries = out_entries.mutable_view(entry_size);
+  }
+
+  att_->Reply(tid, std::move(buffer));
+}
+
+void Server::OnReadByGroupType(att::Bearer::TransactionId tid,
+                               const att::PacketReader& packet) {
+  FXL_DCHECK(packet.opcode() == att::kReadByGroupTypeRequest);
+
+  att::Handle start, end;
+  common::UUID group_type;
+
+  // The group type is represented as either a 16-bit or 128-bit UUID.
+  if (packet.payload_size() == sizeof(att::ReadByTypeRequestParams16)) {
+    const auto& params = packet.payload<att::ReadByTypeRequestParams16>();
+    start = le16toh(params.start_handle);
+    end = le16toh(params.end_handle);
+    group_type = common::UUID(le16toh(params.type));
+  } else if (packet.payload_size() == sizeof(att::ReadByTypeRequestParams128)) {
+    const auto& params = packet.payload<att::ReadByTypeRequestParams128>();
+    start = le16toh(params.start_handle);
+    end = le16toh(params.end_handle);
+    group_type = common::UUID(params.type);
+  } else {
+    att_->ReplyWithError(tid, att::kInvalidHandle, att::ErrorCode::kInvalidPDU);
+    return;
+  }
+
+  if (group_type != types::kPrimaryService &&
+      group_type != types::kSecondaryService) {
+    att_->ReplyWithError(tid, start, att::ErrorCode::kUnsupportedGroupType);
+    return;
+  }
+
+  constexpr size_t kRspStructSize = sizeof(att::ReadByGroupTypeResponseParams);
+  constexpr size_t kHeaderSize = sizeof(att::Header) + kRspStructSize;
+  FXL_DCHECK(kHeaderSize <= att_->mtu());
+
+  size_t value_size;
+  std::list<const att::Attribute*> results;
+  auto error_code = ReadByTypeHelper(
+      start, end, group_type, true /* group_type */, att_->mtu() - kHeaderSize,
+      att::kMaxReadByGroupTypeValueLength, sizeof(att::AttributeGroupDataEntry),
+      &value_size, &results);
+  if (error_code != att::ErrorCode::kNoError) {
+    att_->ReplyWithError(tid, start, error_code);
+    return;
+  }
+
+  FXL_DCHECK(!results.empty());
+
+  size_t entry_size = value_size + sizeof(att::AttributeGroupDataEntry);
+  size_t pdu_size = kHeaderSize + entry_size * results.size();
+  FXL_DCHECK(pdu_size <= att_->mtu());
+
+  auto buffer = common::NewSlabBuffer(pdu_size);
+  FXL_CHECK(buffer);
+
+  att::PacketWriter writer(att::kReadByGroupTypeResponse, buffer.get());
+  auto params = writer.mutable_payload<att::ReadByGroupTypeResponseParams>();
+
+  FXL_DCHECK(entry_size <= std::numeric_limits<uint8_t>::max());
+  params->length = static_cast<uint8_t>(entry_size);
+
+  // Points to the next entry in the target PDU.
+  auto next_entry = writer.mutable_payload_data().mutable_view(kRspStructSize);
+  for (const auto& attr : results) {
+    auto* entry = reinterpret_cast<att::AttributeGroupDataEntry*>(
+        next_entry.mutable_data());
+    entry->start_handle = htole16(attr->group().start_handle());
+    entry->group_end_handle = htole16(attr->group().end_handle());
+    next_entry.Write(attr->group().decl_value().view(0, value_size),
+                     sizeof(att::AttributeGroupDataEntry));
+
+    next_entry = next_entry.mutable_view(entry_size);
+  }
+
+  att_->Reply(tid, std::move(buffer));
+}
+
+void Server::OnReadByType(att::Bearer::TransactionId tid,
+                          const att::PacketReader& packet) {
+  FXL_DCHECK(packet.opcode() == att::kReadByTypeRequest);
+
+  att::Handle start, end;
+  common::UUID type;
+
+  // The attribute type is represented as either a 16-bit or 128-bit UUID.
+  if (packet.payload_size() == sizeof(att::ReadByTypeRequestParams16)) {
+    const auto& params = packet.payload<att::ReadByTypeRequestParams16>();
+    start = le16toh(params.start_handle);
+    end = le16toh(params.end_handle);
+    type = common::UUID(le16toh(params.type));
+  } else if (packet.payload_size() == sizeof(att::ReadByTypeRequestParams128)) {
+    const auto& params = packet.payload<att::ReadByTypeRequestParams128>();
+    start = le16toh(params.start_handle);
+    end = le16toh(params.end_handle);
+    type = common::UUID(params.type);
+  } else {
+    att_->ReplyWithError(tid, att::kInvalidHandle, att::ErrorCode::kInvalidPDU);
+    return;
+  }
+
+  constexpr size_t kRspStructSize = sizeof(att::ReadByTypeResponseParams);
+  constexpr size_t kHeaderSize = sizeof(att::Header) + kRspStructSize;
+  FXL_DCHECK(kHeaderSize <= att_->mtu());
+
+  size_t value_size;
+  std::list<const att::Attribute*> results;
+  auto error_code = ReadByTypeHelper(
+      start, end, type, false /* group_type */, att_->mtu() - kHeaderSize,
+      att::kMaxReadByTypeValueLength, sizeof(att::AttributeData), &value_size,
+      &results);
+  if (error_code != att::ErrorCode::kNoError) {
+    att_->ReplyWithError(tid, start, error_code);
+    return;
+  }
+
+  FXL_DCHECK(!results.empty());
+
+  // If the value is dynamic, then delegate the read to any registered handler.
+  if (!results.front()->value()) {
+    FXL_DCHECK(results.size() == 1u);
+
+    const size_t kMaxValueSize =
+        std::min(att_->mtu() - kHeaderSize - sizeof(att::AttributeData),
+                 static_cast<size_t>(att::kMaxReadByTypeValueLength));
+
+    att::Handle handle = results.front()->handle();
+    auto self = weak_ptr_factory_.GetWeakPtr();
+    auto result_cb = [self, tid, handle, kMaxValueSize, kHeaderSize](
+                         att::ErrorCode ecode, const auto& value) {
+      if (!self)
+        return;
+
+      if (ecode != att::ErrorCode::kNoError) {
+        self->att_->ReplyWithError(tid, handle, ecode);
+        return;
+      }
+
+      // Respond with just a single entry.
+      size_t value_size = std::min(value.size(), kMaxValueSize);
+      size_t entry_size = value_size + sizeof(att::AttributeData);
+      auto buffer = common::NewSlabBuffer(entry_size + kHeaderSize);
+      att::PacketWriter writer(att::kReadByTypeResponse, buffer.get());
+
+      auto params = writer.mutable_payload<att::ReadByTypeResponseParams>();
+      params->length = static_cast<uint8_t>(entry_size);
+      params->attribute_data_list->handle = htole16(handle);
+      writer.mutable_payload_data().Write(
+          value.data(), value_size, sizeof(params->length) + sizeof(handle));
+
+      self->att_->Reply(tid, std::move(buffer));
+    };
+
+    // Respond with an error if no read handler was registered.
+    if (!results.front()->ReadAsync(0, result_cb)) {
+      att_->ReplyWithError(tid, handle, att::ErrorCode::kReadNotPermitted);
+    }
+    return;
+  }
+
+  size_t entry_size = sizeof(att::AttributeData) + value_size;
+  FXL_DCHECK(entry_size <= std::numeric_limits<uint8_t>::max());
+
+  size_t pdu_size = kHeaderSize + entry_size * results.size();
+  FXL_DCHECK(pdu_size <= att_->mtu());
+
+  auto buffer = common::NewSlabBuffer(pdu_size);
+  FXL_CHECK(buffer);
+
+  att::PacketWriter writer(att::kReadByTypeResponse, buffer.get());
+  auto params = writer.mutable_payload<att::ReadByTypeResponseParams>();
+  params->length = static_cast<uint8_t>(entry_size);
+
+  // Points to the next entry in the target PDU.
+  auto next_entry = writer.mutable_payload_data().mutable_view(kRspStructSize);
+  for (const auto& attr : results) {
+    auto* entry =
+        reinterpret_cast<att::AttributeData*>(next_entry.mutable_data());
+    entry->handle = htole16(attr->handle());
+    next_entry.Write(attr->value()->view(0, value_size), sizeof(entry->handle));
+
+    next_entry = next_entry.mutable_view(entry_size);
+  }
+
+  att_->Reply(tid, std::move(buffer));
+}
+
+void Server::OnReadRequest(att::Bearer::TransactionId tid,
+                           const att::PacketReader& packet) {
+  FXL_DCHECK(packet.opcode() == att::kReadRequest);
+
+  if (packet.payload_size() != sizeof(att::ReadRequestParams)) {
+    att_->ReplyWithError(tid, att::kInvalidHandle, att::ErrorCode::kInvalidPDU);
+    return;
+  }
+
+  const auto& params = packet.payload<att::WriteRequestParams>();
+  att::Handle handle = le16toh(params.handle);
+
+  const auto* attr = db_->FindAttribute(handle);
+  if (!attr) {
+    att_->ReplyWithError(tid, handle, att::ErrorCode::kInvalidHandle);
+    return;
+  }
+
+  // TODO(armansito): Check against the connection security level here and
+  // succeed if it is sufficient.
+  if (!attr->read_reqs().allowed_without_security()) {
+    att_->ReplyWithError(tid, handle, att::ErrorCode::kReadNotPermitted);
+    return;
+  }
+
+  constexpr size_t kHeaderSize = sizeof(att::Header);
+
+  auto self = weak_ptr_factory_.GetWeakPtr();
+  auto callback = [self, tid, handle](att::ErrorCode ecode, const auto& value) {
+    if (!self)
+      return;
+
+    if (ecode != att::ErrorCode::kNoError) {
+      self->att_->ReplyWithError(tid, handle, ecode);
+      return;
+    }
+
+    size_t value_size = std::min(value.size(), self->att_->mtu() - kHeaderSize);
+    auto buffer = common::NewSlabBuffer(value_size + kHeaderSize);
+    FXL_CHECK(buffer);
+
+    att::PacketWriter writer(att::kReadResponse, buffer.get());
+    writer.mutable_payload_data().Write(value.view(0, value_size));
+
+    self->att_->Reply(tid, std::move(buffer));
+  };
+
+  // Use the cached value if there is one.
+  if (attr->value()) {
+    callback(att::ErrorCode::kNoError, *attr->value());
+    return;
+  }
+
+  if (!attr->ReadAsync(0, callback)) {
+    att_->ReplyWithError(tid, handle, att::ErrorCode::kReadNotPermitted);
+  }
+}
+
+void Server::OnWriteRequest(att::Bearer::TransactionId tid,
+                            const att::PacketReader& packet) {
+  FXL_DCHECK(packet.opcode() == att::kWriteRequest);
+
+  if (packet.payload_size() < sizeof(att::WriteRequestParams)) {
+    att_->ReplyWithError(tid, att::kInvalidHandle, att::ErrorCode::kInvalidPDU);
+    return;
+  }
+
+  const auto& params = packet.payload<att::WriteRequestParams>();
+  att::Handle handle = le16toh(params.handle);
+
+  const auto* attr = db_->FindAttribute(handle);
+  if (!attr) {
+    att_->ReplyWithError(tid, handle, att::ErrorCode::kInvalidHandle);
+    return;
+  }
+
+  // TODO(armansito): Check against the connection security level here and
+  // succeed if it is sufficient.
+  if (!attr->write_reqs().allowed_without_security()) {
+    att_->ReplyWithError(tid, handle, att::ErrorCode::kWriteNotPermitted);
+    return;
+  }
+
+  // Attributes with a static value cannot be written.
+  if (attr->value()) {
+    att_->ReplyWithError(tid, handle, att::ErrorCode::kWriteNotPermitted);
+    return;
+  }
+
+  auto value_view = packet.payload_data().view(sizeof(params.handle));
+  if (value_view.size() > att::kMaxAttributeValueLength) {
+    att_->ReplyWithError(tid, handle,
+                         att::ErrorCode::kInvalidAttributeValueLength);
+    return;
+  }
+
+  auto self = weak_ptr_factory_.GetWeakPtr();
+  auto result_cb = [self, tid, handle](att::ErrorCode error_code) {
+    if (!self)
+      return;
+
+    if (error_code != att::ErrorCode::kNoError) {
+      self->att_->ReplyWithError(tid, handle, error_code);
+      return;
+    }
+
+    auto buffer = common::NewSlabBuffer(1);
+    (*buffer)[0] = att::kWriteResponse;
+    self->att_->Reply(tid, std::move(buffer));
+  };
+
+  if (!attr->WriteAsync(0, value_view, result_cb)) {
+    att_->ReplyWithError(tid, handle, att::ErrorCode::kWriteNotPermitted);
+  }
+}
+
+att::ErrorCode Server::ReadByTypeHelper(
+    att::Handle start,
+    att::Handle end,
+    const common::UUID& type,
+    bool group_type,
+    size_t max_data_list_size,
+    size_t max_value_size,
+    size_t entry_prefix_size,
+    size_t* out_value_size,
+    std::list<const att::Attribute*>* out_results) {
+  FXL_DCHECK(out_results);
+  FXL_DCHECK(out_value_size);
+
+  if (start == att::kInvalidHandle || start > end)
+    return att::ErrorCode::kInvalidHandle;
+
+  auto iter = db_->GetIterator(start, end, &type, group_type);
+  if (iter.AtEnd())
+    return att::ErrorCode::kAttributeNotFound;
+
+  // |value_size| is the size of the complete attribute value for each result
+  // entry. |entry_size| = |value_size| + |entry_prefix_size|. We store these
+  // separately to avoid recalculating one every it gets checked.
+  size_t value_size;
+  size_t entry_size;
+  std::list<const att::Attribute*> results;
+
+  for (; !iter.AtEnd(); iter.Advance()) {
+    const auto* attr = iter.get();
+    FXL_DCHECK(attr);
+
+    auto sec_result =
+        CheckSecurity(attr->read_reqs(), true /* read_or_write */);
+    if (sec_result != att::ErrorCode::kNoError) {
+      // Return error only if this is the first result that matched. We simply
+      // stop the search otherwise.
+      if (results.empty())
+        return sec_result;
+
+      break;
+    }
+
+    // The first result determines |value_size| and |entry_size|.
+    if (results.empty()) {
+      if (!attr->value()) {
+        // If the first value is dynamic then this is the only attribute that
+        // this call will return. No need to calculate the value size.
+        results.push_back(attr);
+        break;
+      }
+
+      value_size = attr->value()->size();  // untruncated value size
+      entry_size =
+          std::min(std::min(value_size, max_value_size) + entry_prefix_size,
+                   max_data_list_size);
+
+      // Actual value size to include in a PDU.
+      *out_value_size = entry_size - entry_prefix_size;
+
+    } else if (!attr->value() || attr->value()->size() != value_size ||
+               entry_size > max_data_list_size) {
+      // Stop the search and exclude this attribute because either:
+      // a. we ran into a dynamic value in a result that contains static values,
+      // b. the matching attribute has a different value size than the first
+      //    attribute,
+      // c. there is no remaning space in the response PDU.
+      break;
+    }
+
+    results.push_back(attr);
+    max_data_list_size -= entry_size;
+  }
+
+  if (results.empty())
+    return att::ErrorCode::kAttributeNotFound;
+
+  *out_results = std::move(results);
+  return att::ErrorCode::kNoError;
+}
+
+}  // namespace gatt
+}  // namespace btlib

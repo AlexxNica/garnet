@@ -25,6 +25,7 @@
 #include "lib/fxl/functional/auto_call.h"
 #include "lib/fxl/functional/make_copyable.h"
 #include "lib/fxl/strings/string_printf.h"
+#include "lib/svc/cpp/services.h"
 
 namespace app {
 namespace {
@@ -282,9 +283,10 @@ void JobHolder::CreateApplication(
   // launch_info is moved before LoadApplication() gets at its first argument.
   fidl::String url = launch_info->url;
   loader_->LoadApplication(
-      url, fxl::MakeCopyable([this, launch_info = std::move(launch_info),
-                              controller = std::move(controller)](
-                                 ApplicationPackagePtr package) mutable {
+      url, fxl::MakeCopyable([
+        this, launch_info = std::move(launch_info),
+        controller = std::move(controller)
+      ](ApplicationPackagePtr package) mutable {
         fxl::RefPtr<ApplicationNamespace> application_namespace =
             default_namespace_;
         if (!launch_info->additional_services.is_null()) {
@@ -357,7 +359,6 @@ void JobHolder::CreateApplicationWithRunner(
     return;
 
   NamespaceBuilder builder;
-  builder.AddDeprecatedDefaultDirectories();
   builder.AddServices(std::move(svc));
   AddInfoDir(&builder);
 
@@ -365,7 +366,9 @@ void JobHolder::CreateApplicationWithRunner(
   // Note that this must be the last |builder| step adding entries to the
   // namespace so that we can filter out entries already added in previous
   // steps.
+  // HACK(alhaad): We add deprecated default directories after this.
   builder.AddFlatNamespace(std::move(launch_info->flat_namespace));
+  builder.AddDeprecatedDefaultDirectories();
 
   auto startup_info = ApplicationStartupInfo::New();
   startup_info->launch_info = std::move(launch_info);
@@ -391,9 +394,6 @@ void JobHolder::CreateApplicationWithProcess(
     return;
 
   NamespaceBuilder builder;
-  // TODO(abarth): Remove this call to AddDeprecatedDefaultDirectories once
-  // every application has a proper sandbox configuration.
-  builder.AddDeprecatedDefaultDirectories();
   builder.AddServices(std::move(svc));
   AddInfoDir(&builder);
 
@@ -401,7 +401,11 @@ void JobHolder::CreateApplicationWithProcess(
   // Note that this must be the last |builder| step adding entries to the
   // namespace so that we can filter out entries already added in previous
   // steps.
+  // HACK(alhaad): We add deprecated default directories after this.
   builder.AddFlatNamespace(std::move(launch_info->flat_namespace));
+  // TODO(abarth): Remove this call to AddDeprecatedDefaultDirectories once
+  // every application has a proper sandbox configuration.
+  builder.AddDeprecatedDefaultDirectories();
 
   const std::string url = launch_info->url;  // Keep a copy before moving it.
   zx::channel service_dir_channel = BindServiceDirectory(launch_info.get());
@@ -467,23 +471,11 @@ void JobHolder::CreateApplicationFromArchive(
     }
 
     auto inner_package = ApplicationPackage::New();
-    inner_package->data = file_system->GetFileAsVMO(kAppPath).ToTransport();
     inner_package->resolved_url = package->resolved_url;
 
     auto startup_info = ApplicationStartupInfo::New();
     startup_info->launch_info = std::move(launch_info);
-    // NOTE: startup_info->flat_namespace is currently (7/2017) mostly ignored
-    // by all runners: https://fuchsia.atlassian.net/browse/US-313. They only
-    // extract /svc to expose to children through app::ApplicationContext.
-    // We would rather expose everything in |builder| as the effective global
-    // namespace for each child application.
-    auto flat_namespace = FlatNamespace::New();
-    flat_namespace->paths.resize(1);
-    flat_namespace->paths[0] = "/svc";
-    flat_namespace->directories.resize(1);
-    flat_namespace->directories[0] =
-        application_namespace->services().OpenAsDirectory();
-    startup_info->flat_namespace = std::move(flat_namespace);
+    startup_info->flat_namespace = builder.BuildForRunner();
 
     auto* runner = GetOrCreateRunner(runtime.runner());
     if (runner == nullptr) {
@@ -519,11 +511,11 @@ ApplicationRunnerHolder* JobHolder::GetOrCreateRunner(
   // recursively to detect cycles.
   auto result = runners_.emplace(runner, nullptr);
   if (result.second) {
-    ServiceProviderPtr runner_services;
+    Services runner_services;
     ApplicationControllerPtr runner_controller;
     auto runner_launch_info = ApplicationLaunchInfo::New();
     runner_launch_info->url = runner;
-    runner_launch_info->services = runner_services.NewRequest();
+    runner_launch_info->service_request = runner_services.NewRequest();
     CreateApplication(std::move(runner_launch_info),
                       runner_controller.NewRequest());
 

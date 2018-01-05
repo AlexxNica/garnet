@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef GARNET_BIN_UI_SCENE_MANAGER_RESOURCES_RESOURCE_TYPE_INFO_H_
+#define GARNET_BIN_UI_SCENE_MANAGER_RESOURCES_RESOURCE_TYPE_INFO_H_
 
 #include <cstdint>
 
@@ -47,11 +48,13 @@ enum ResourceType {
   // Scene, camera, lighting.
   kScene = 1 << 23,
   kCamera = 1 << 24,
-  kDirectionalLight = 1 << 25,
-  kRenderer = 1 << 26,
+  kLight = 1 << 25,
+  kAmbientLight = 1 << 26,
+  kDirectionalLight = 1 << 27,
+  kRenderer = 1 << 28,
 
   // Animation
-  kVariable = 1 << 27,
+  kVariable = 1 << 29,
 };
 
 // Bitwise combination of ResourceTypes.  A subclass hierarchy can be
@@ -76,3 +79,5 @@ struct ResourceTypeInfo {
 };
 
 }  // namespace scene_manager
+
+#endif  // GARNET_BIN_UI_SCENE_MANAGER_RESOURCES_RESOURCE_TYPE_INFO_H_

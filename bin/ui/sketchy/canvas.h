@@ -2,10 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef GARNET_BIN_UI_SKETCHY_CANVAS_H_
+#define GARNET_BIN_UI_SKETCHY_CANVAS_H_
 
 #include <unordered_map>
-
+#include "garnet/bin/ui/sketchy/buffer/shared_buffer_pool.h"
 #include "garnet/bin/ui/sketchy/resources/resource_map.h"
 #include "garnet/bin/ui/sketchy/resources/stroke_group.h"
 #include "garnet/bin/ui/sketchy/resources/types.h"
@@ -41,6 +42,10 @@ class CanvasImpl final : public sketchy::Canvas {
   bool ApplyAddStrokeOp(const sketchy::AddStrokeOpPtr& op);
   bool ApplyRemoveStrokeOp(const sketchy::RemoveStrokeOpPtr& op);
 
+  bool ApplyBeginStrokeOp(const sketchy::BeginStrokeOpPtr& op);
+  bool ApplyExtendStrokeOp(const sketchy::ExtendStrokeOpPtr& op);
+  bool ApplyFinishStrokeOp(const sketchy::FinishStrokeOpPtr& op);
+
   bool ApplyScenicImportResourceOp(
       const scenic::ImportResourceOpPtr& import_resource);
 
@@ -56,17 +61,16 @@ class CanvasImpl final : public sketchy::Canvas {
   bool ApplyScenicAddChildOp(const scenic::AddChildOpPtr& add_child);
 
   scenic_lib::Session* const session_;
-  escher::Escher* const escher_;
-
-  // TODO: use more sophisticated factory that suballocates from larger GPU
-  // memory allocations, and recycles buffers when they are no longer used.
-  escher::BufferFactory buffer_factory_;
-  StrokeManager stroke_manager_;
+  SharedBufferPool shared_buffer_pool_;
 
   ::fidl::Array<sketchy::OpPtr> ops_;
   ResourceMap resource_map_;
   bool is_scenic_present_requested_ = false;
   std::vector<scenic_lib::Session::PresentCallback> callbacks_;
+
+  StrokeManager stroke_manager_;
 };
 
 }  // namespace sketchy_service
+
+#endif  // GARNET_BIN_UI_SKETCHY_CANVAS_H_

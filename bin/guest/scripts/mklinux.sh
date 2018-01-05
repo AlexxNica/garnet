@@ -5,10 +5,8 @@
 # Use of this source code is governed by a MIT-style
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT
-#
-# Clone and build a Linux kernel for use as a guest.
 
-set -e
+set -eo pipefail
 
 usage() {
   echo "usage: ${0} [options] {arm64, x86}"
@@ -26,6 +24,7 @@ while getopts "c:d:" OPT; do
   *) usage;;
   esac
 done
+shift $((OPTIND - 1))
 
 case "${1}" in
 arm64)

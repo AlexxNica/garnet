@@ -74,7 +74,8 @@ func PrintBssDescription(bss *mlme.BssDescription) {
 	log.Print("    DTIM period: ", bss.DtimPeriod)
 	log.Print("    Timestamp: ", bss.Timestamp)
 	log.Print("    Local time: ", bss.LocalTime)
-	log.Print("    Channel: ", bss.Channel)
+	// TODO(porce): Stringfy CBW
+	log.Printf("    Channel: %u CBW: %u", bss.Chan.Primary, bss.Chan.Cbw)
 	if bss.RssiMeasurement != 0xff {
 		log.Printf("    RSSI: %d dBm", int8(bss.RssiMeasurement))
 	}
@@ -212,4 +213,25 @@ func PrintDeauthenticateIndication(ind *mlme.DeauthenticateIndication) {
 func PrintSignalReportIndication(ind *mlme_ext.SignalReportIndication) {
 	log.Print("SignalReportIndication")
 	log.Printf("  RSSI: %d", ind.Rssi)
+}
+
+func PrintDeviceQueryResponse(resp *mlme_ext.DeviceQueryResponse) {
+	log.Print("DeviceQueryResponse")
+	log.Print("  Modes:")
+	for _, mode := range resp.Modes {
+		switch mode {
+		case mlme_ext.MacMode_Sta:
+			log.Print("    STA")
+		case mlme_ext.MacMode_Ap:
+			log.Print("    AP")
+		default:
+			log.Printf("    Unknown(%v)", mode)
+		}
+	}
+	for i, band := range resp.Bands {
+		log.Printf("  Band %v:", i)
+		log.Printf("    Basic rates: %v", band.BasicRates)
+		log.Printf("    Base frequency: %v", band.BaseFrequency)
+		log.Printf("    Channels: %v", band.Channels)
+	}
 }

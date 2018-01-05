@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef GARNET_BIN_UI_SCENE_MANAGER_ENGINE_FRAME_TIMINGS_H_
+#define GARNET_BIN_UI_SCENE_MANAGER_ENGINE_FRAME_TIMINGS_H_
 
 #include <zx/time.h>
 #include <vector>
@@ -32,7 +33,7 @@ class FrameTimings : public escher::Reffable {
   // finished, and when the frame is actually presented on that swapchain.
   size_t AddSwapchain(Swapchain* swapchain);
 
-  void OnFrameFinishedRendering(size_t swapchain_index, zx_time_t time);
+  void OnFrameRendered(size_t swapchain_index, zx_time_t time);
   void OnFramePresented(size_t swapchain_index, zx_time_t time);
 
   uint64_t frame_number() const { return frame_number_; }
@@ -50,7 +51,7 @@ class FrameTimings : public escher::Reffable {
   void Finalize();
 
   struct Record {
-    zx_time_t frame_finished_time = 0;
+    zx_time_t frame_rendered_time = 0;
     zx_time_t frame_presented_time = 0;
   };
   std::vector<Record> swapchain_records_;
@@ -58,8 +59,10 @@ class FrameTimings : public escher::Reffable {
   const uint64_t frame_number_;
   const zx_time_t target_presentation_time_;
   zx_time_t actual_presentation_time_ = 0;
-  size_t frame_finished_rendering_count_ = 0;
+  size_t frame_rendered_count_ = 0;
   size_t frame_presented_count_ = 0;
 };
 
 }  // namespace scene_manager
+
+#endif  // GARNET_BIN_UI_SCENE_MANAGER_ENGINE_FRAME_TIMINGS_H_

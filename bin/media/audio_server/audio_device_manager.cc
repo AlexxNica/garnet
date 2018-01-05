@@ -103,7 +103,17 @@ MediaResult AudioDeviceManager::AddDevice(
   }
 
   if (device->plugged()) {
-    OnDevicePlugged(device);
+    // TODO(johngro): Remove this gross kludge when routing decisions move up to
+    // the policy layer (where they belong).  Right now, OnDevicePlugged will
+    // not bother to re-route if it things that there has been no actual plug
+    // state change (for example, if there was a spurious plug state change sent
+    // by a driver or something).  To work around this, if a device came into
+    // being in the already-plugged-state, we force it into the unplugged state
+    // before calling OnDevicePlugged, just to make sure that OnDevicePlugged
+    // sees a plug state change.
+    zx_time_t plug_time = device->plug_time();
+    device->UpdatePlugState(false, plug_time);
+    OnDevicePlugged(device, plug_time);
   }
 
   return res;
@@ -118,9 +128,7 @@ void AudioDeviceManager::RemoveDevice(const fbl::RefPtr<AudioDevice>& device) {
   device->Unlink();
 
   if (device->in_object_list()) {
-    if (device->UpdatePlugState(false, device->plug_time())) {
-      OnDeviceUnplugged(device);
-    }
+    OnDeviceUnplugged(device, device->plug_time());
     device->Shutdown();
     devices_.erase(*device);
   }
@@ -131,12 +139,10 @@ void AudioDeviceManager::HandlePlugStateChange(
     bool plugged,
     zx_time_t plug_time) {
   FXL_DCHECK(device != nullptr);
-  if (device->UpdatePlugState(plugged, plug_time)) {
-    if (plugged) {
-      OnDevicePlugged(device);
-    } else {
-      OnDeviceUnplugged(device);
-    }
+  if (plugged) {
+    OnDevicePlugged(device, plug_time);
+  } else {
+    OnDeviceUnplugged(device, plug_time);
   }
 }
 
@@ -271,12 +277,35 @@ fbl::RefPtr<AudioDevice> AudioDeviceManager::FindLastPlugged(
 }
 
 void AudioDeviceManager::OnDeviceUnplugged(
-    const fbl::RefPtr<AudioDevice>& device) {
-  FXL_DCHECK(device && !device->plugged());
+    const fbl::RefPtr<AudioDevice>& device, zx_time_t plug_time) {
+  FXL_DCHECK(device);
+
+  // Start by checking to see if this device was the last plugged device (before
+  // we update the plug state).
+  bool was_last_plugged = FindLastPlugged(device->type()) == device;
+
+  // Update the plug state of the device.  If this was not an actual change in
+  // the plug state of the device, then we are done.
+  if (!device->UpdatePlugState(false, plug_time)) {
+    return;
+  }
 
   // This device was just unplugged.  Unlink it from everything it is currently
   // linked to.
   device->Unlink();
+  // TODO(mpuryear): See MTWN-64. If this device was NOT the last-plugged,
+  // then any attached sources and destinations are **re-linked** to their
+  // target devices. In the case of renderers, this duplicate link leads to
+  // output volume doubling, if non-default output removed during playback.
+  // We should check whether an object is already attached, before linking to
+  // the new target device.
+
+  // If the device which was unplugged was not the last plugged device in the
+  // system, then there has been no change in who was the last plugged device,
+  // and no updates to the routing state are needed.
+  if (!was_last_plugged) {
+    return;
+  }
 
   if (device->is_output()) {
     // This was an output.  If we are applying 'last plugged output' policy, go
@@ -297,13 +326,7 @@ void AudioDeviceManager::OnDeviceUnplugged(
         }
       }
 
-      for (auto& obj : capturers_) {
-        FXL_DCHECK(obj.is_capturer());
-        auto capturer = static_cast<AudioCapturerImpl*>(&obj);
-        if (capturer->loopback()) {
-          AudioObject::LinkObjects(replacement, fbl::WrapRefPtr(capturer));
-        }
-      }
+      LinkToCapturers(replacement);
     }
   } else {
     // This was an input.  Find the new most recently plugged in input (if any),
@@ -313,27 +336,27 @@ void AudioDeviceManager::OnDeviceUnplugged(
 
     fbl::RefPtr<AudioInput> replacement = FindLastPluggedInput();
     if (replacement) {
-      for (auto& obj : capturers_) {
-        FXL_DCHECK(obj.is_capturer());
-        auto capturer = static_cast<AudioCapturerImpl*>(&obj);
-        if (!capturer->loopback()) {
-          AudioObject::LinkObjects(replacement, fbl::WrapRefPtr(capturer));
-        }
-      }
+      LinkToCapturers(replacement);
     }
   }
 }
 
 void AudioDeviceManager::OnDevicePlugged(
-    const fbl::RefPtr<AudioDevice>& device) {
-  FXL_DCHECK(device && device->plugged());
+    const fbl::RefPtr<AudioDevice>& device, zx_time_t plug_time) {
+  FXL_DCHECK(device);
+
+  // Update the plug state of the device.  If this was not an actual change in
+  // the plug state of the device, then we are done.
+  if (!device->UpdatePlugState(true, plug_time)) {
+    return;
+  }
 
   if (device->is_output()) {
     // This new device is an output.  Go over our list of renderers and "do the
     // right thing" based on our current routing policy.  If we are using last
     // plugged policy, replace all of the renderers current output with this new
     // one (assuming that this new one is actually the most recently plugged).
-    // Of we are using the "all plugged" policy, then just add this new output
+    // If we are using the "all plugged" policy, then just add this new output
     // to all of the renderers.
     //
     // Then, apply last plugged policy to all of the capturers which are in
@@ -347,19 +370,14 @@ void AudioDeviceManager::OnDevicePlugged(
     bool lp_policy = (routing_policy_ == RoutingPolicy::LAST_PLUGGED_OUTPUT);
     bool is_lp = (output == last_plugged.get());
 
-    if (!lp_policy) {
-      for (auto& obj : renderers_) {
-        FXL_DCHECK(obj.is_renderer());
-        auto renderer = static_cast<AudioRendererImpl*>(&obj);
-        LinkOutputToRenderer(output, renderer);
-      }
-    } else if (is_lp) {
+    if (is_lp && lp_policy) {
       for (auto& unlink_tgt : devices_) {
         if (unlink_tgt.is_output() && (&unlink_tgt != device.get())) {
           unlink_tgt.UnlinkSources();
         }
       }
-
+    }
+    if (is_lp || !lp_policy) {
       for (auto& obj : renderers_) {
         FXL_DCHECK(obj.is_renderer());
         auto renderer = static_cast<AudioRendererImpl*>(&obj);
@@ -367,36 +385,37 @@ void AudioDeviceManager::OnDevicePlugged(
       }
     }
 
-    // TODO(mpuryear): Refactor this code for logic reuse as inputs come and go,
-    // regardless of whether they are loopbacks.
+    // 'loopback' capturers should listen to this output now
     if (is_lp) {
-      for (auto& obj : capturers_) {
-        FXL_DCHECK(obj.is_capturer());
-        auto capturer = static_cast<AudioCapturerImpl*>(&obj);
-        if (capturer->loopback()) {
-          capturer->UnlinkSources();
-          AudioObject::LinkObjects(device, fbl::WrapRefPtr(capturer));
-        }
-      }
+      LinkToCapturers(device);
     }
   } else {
     FXL_DCHECK(device->is_input());
 
-    // This new device is an input.  If it is the most recently plugged input,
-    // go over our list of capturers, and for each non-loopback capturer,
-    // replace their current sources with this input.
     fbl::RefPtr<AudioInput> last_plugged = FindLastPluggedInput();
     auto input = static_cast<AudioInput*>(device.get());
 
+    // non-'loopback' capturers should listen to this input now
     if (input == last_plugged.get()) {
-      for (auto& obj : capturers_) {
-        FXL_DCHECK(obj.is_capturer());
-        auto capturer = static_cast<AudioCapturerImpl*>(&obj);
-        if (!capturer->loopback()) {
-          capturer->UnlinkSources();
-          AudioObject::LinkObjects(device, fbl::WrapRefPtr(capturer));
-        }
-      }
+      LinkToCapturers(device);
+    }
+  }
+}
+
+// New device arrived and is the most-recently-plugged.
+// *If device is an output, all 'loopback' capturers should
+// listen to this output going forward (default output).
+// *If device is an input, then all NON-'loopback' capturers
+// should listen to this input going forward (default input).
+void AudioDeviceManager::LinkToCapturers(const fbl::RefPtr<AudioDevice>& device) {
+  bool link_to_loopbacks = device->is_output();
+
+  for (auto& obj : capturers_) {
+    FXL_DCHECK(obj.is_capturer());
+    auto capturer = static_cast<AudioCapturerImpl*>(&obj);
+    if (capturer->loopback() == link_to_loopbacks) {
+      capturer->UnlinkSources();
+      AudioObject::LinkObjects(device, fbl::WrapRefPtr(capturer));
     }
   }
 }

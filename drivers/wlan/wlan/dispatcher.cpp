@@ -3,12 +3,15 @@
 // found in the LICENSE file.
 
 #include "dispatcher.h"
+#include "ap_mlme.h"
 #include "client_mlme.h"
 #include "frame_handler.h"
 #include "packet.h"
 #include "serialize.h"
 
+#include "garnet/drivers/wlan/common/channel.h"
 #include "lib/wlan/fidl/wlan_mlme.fidl-common.h"
+#include "lib/wlan/fidl/wlan_mlme_ext.fidl-common.h"
 
 #include <ddk/protocol/wlan.h>
 #include <fbl/unique_ptr.h>
@@ -39,10 +42,10 @@ void DumpPacket(const Packet& packet) {
 void DumpRxInfo(const wlan_rx_info_t& rxinfo) {
     std::printf(
         "WLAN RxInfo: "
-        "flags %08x valid_fields %08x phy %u chan_width %u data_rate %u chan %u "
+        "flags %08x valid_fields %08x phy %u data_rate %u chan %s "
         "mcs %u rssi %u rcpi %u snr %u \n",
-        rxinfo.rx_flags, rxinfo.valid_fields, rxinfo.phy, rxinfo.chan_width, rxinfo.data_rate,
-        rxinfo.chan.channel_num, rxinfo.mcs, rxinfo.rssi, rxinfo.rcpi, rxinfo.snr);
+        rxinfo.rx_flags, rxinfo.valid_fields, rxinfo.phy, rxinfo.data_rate,
+        common::ChanStr(rxinfo.chan).c_str(), rxinfo.mcs, rxinfo.rssi, rxinfo.rcpi, rxinfo.snr);
 }
 
 void DumpFrameHeader(const FrameHeader& hdr, size_t len) {
@@ -73,21 +76,18 @@ void DumpFrameHeader(const FrameHeader& hdr, size_t len) {
 
 }  // namespace
 
-Dispatcher::Dispatcher(DeviceInterface* device) {
+Dispatcher::Dispatcher(DeviceInterface* device) : device_(device) {
     debugfn();
-    mlme_.reset(new ClientMlme(device));
 }
 
 Dispatcher::~Dispatcher() {}
 
-zx_status_t Dispatcher::Init() {
-    debugfn();
-
-    return mlme_->Init();
-}
+template <>
+zx_status_t Dispatcher::HandleMlmeMethod<DeviceQueryRequest>(const Packet* packet, Method method);
 
 zx_status_t Dispatcher::HandlePacket(const Packet* packet) {
     debugfn();
+
     ZX_DEBUG_ASSERT(packet != nullptr);
     ZX_DEBUG_ASSERT(packet->peer() != Packet::Peer::kUnknown);
     debughdr("packet data=%p len=%zu peer=%s\n", packet->data(), packet->len(),
@@ -98,6 +98,15 @@ zx_status_t Dispatcher::HandlePacket(const Packet* packet) {
                        : packet->peer() == Packet::Peer::kService ? "Service" : "Unknown");
 
     if (kLogLevel & kLogDataPacketTrace) { DumpPacket(*packet); }
+
+    // If there is no active MLME, block all packets but service ones.
+    // MLME-JOIN.request and MLME-START.request implicitly select a mode and initialize the MLME.
+    // DEVICE_QUERY.request is used to obtain device capabilities.
+    auto service_msg = (packet->peer() == Packet::Peer::kService);
+    if (mlme_ == nullptr && !service_msg) {
+        errorf("received packet with no active MLME\n");
+        return ZX_OK;
+    }
 
     zx_status_t status = ZX_OK;
     switch (packet->peer()) {
@@ -166,6 +175,7 @@ zx_status_t Dispatcher::HandlePortPacket(uint64_t key) {
 
 zx_status_t Dispatcher::HandleCtrlPacket(const Packet* packet) {
     debugfn();
+
     // Currently not used.
     return ZX_OK;
 }
@@ -271,6 +281,15 @@ zx_status_t Dispatcher::HandleMgmtPacket(const Packet* packet) {
             return ZX_ERR_IO;
         }
         auto frame = MgmtFrame<Deauthentication>(hdr, deauth, payload_len);
+        return mlme_->HandleFrame(frame, *rxinfo);
+    }
+    case ManagementSubtype::kAssociationRequest: {
+        auto authreq = packet->field<AssociationRequest>(hdr->len());
+        if (authreq == nullptr) {
+            errorf("assocation request packet too small (len=%zd)\n", payload_len);
+            return ZX_ERR_IO;
+        }
+        auto frame = MgmtFrame<AssociationRequest>(hdr, authreq, payload_len);
         return mlme_->HandleFrame(frame, *rxinfo);
     }
     case ManagementSubtype::kAssociationResponse: {
@@ -381,10 +400,51 @@ zx_status_t Dispatcher::HandleSvcPacket(const Packet* packet) {
     debughdr("service packet txn_id=%" PRIu64 " flags=%u ordinal=%u\n", hdr->txn_id, hdr->flags,
              hdr->ordinal);
 
-    // TODO(hahnr): Add logic to switch between Client and AP mode.
-
     auto method = static_cast<Method>(hdr->ordinal);
+
+    if (method == Method::DEVICE_QUERY_request) {
+        return HandleMlmeMethod<DeviceQueryRequest>(packet, method);
+    }
+
+    // Only a subset of requests are supported before an MLME has been initialized.
+    if (mlme_ == nullptr) {
+        switch (method) {
+        case Method::SCAN_request:
+        // fallthrough
+        case Method::JOIN_request: {
+            mlme_.reset(new ClientMlme(device_));
+            auto status = mlme_->Init();
+            if (status != ZX_OK) {
+                errorf("Client MLME could not be initialized\n");
+                mlme_.reset();
+                return status;
+            }
+            break;
+        }
+        case Method::START_request: {
+            mlme_.reset(new ApMlme(device_));
+            auto status = mlme_->Init();
+            if (status != ZX_OK) {
+                errorf("AP MLME could not be initialized\n");
+                mlme_.reset();
+                return status;
+            }
+            break;
+        }
+        default:
+            warnf("unknown MLME method %u with no active MLME\n", method);
+            return ZX_OK;
+        }
+    }
+
     switch (method) {
+    case Method::RESET_request:
+        // Let currently active MLME handle RESET request, then, reset MLME.
+        HandleMlmeMethod<ResetRequest>(packet, method);
+        mlme_.reset();
+        return ZX_OK;
+    case Method::START_request:
+        return HandleMlmeMethodInlinedStruct<StartRequest>(packet, method);
     case Method::SCAN_request:
         return HandleMlmeMethod<ScanRequest>(packet, method);
     case Method::JOIN_request:
@@ -405,10 +465,10 @@ zx_status_t Dispatcher::HandleSvcPacket(const Packet* packet) {
     }
 }
 
-template <typename Message>
+template <typename Message, typename FidlStruct>
 zx_status_t Dispatcher::HandleMlmeMethod(const Packet* packet, Method method) {
-    ::fidl::StructPtr<Message> req;
-    auto status = DeserializeServiceMsg(*packet, method, &req);
+    FidlStruct req;
+    auto status = DeserializeServiceMsg<Message>(*packet, method, &req);
     if (status != ZX_OK) {
         errorf("could not deserialize MLME Method %d: %d\n", method, status);
         return status;
@@ -417,15 +477,60 @@ zx_status_t Dispatcher::HandleMlmeMethod(const Packet* packet, Method method) {
     return mlme_->HandleFrame(method, *req);
 }
 
+template <>
+zx_status_t Dispatcher::HandleMlmeMethod<DeviceQueryRequest>(const Packet* unused_packet,
+                                                             Method method) {
+    debugfn();
+    ZX_DEBUG_ASSERT(method == Method::DEVICE_QUERY_request);
+
+    auto resp = DeviceQueryResponse::New();
+    const wlanmac_info_t& info = device_->GetWlanInfo();
+    if (info.mac_modes & WLAN_MAC_MODE_STA) { resp->modes.push_back(MacMode::STA); }
+    if (info.mac_modes & WLAN_MAC_MODE_AP) { resp->modes.push_back(MacMode::AP); }
+    for (uint8_t band_idx = 0; band_idx < info.num_bands; band_idx++) {
+        const wlan_band_info_t& band_info = info.bands[band_idx];
+        auto band = BandCapabilities::New();
+        band->basic_rates.resize(0);
+        for (size_t rate_idx = 0; rate_idx < sizeof(band_info.basic_rates); rate_idx++) {
+            if (band_info.basic_rates[rate_idx] != 0) {
+                band->basic_rates.push_back(band_info.basic_rates[rate_idx]);
+            }
+        }
+        const wlan_chan_list_t& chan_list = band_info.supported_channels;
+        band->base_frequency = chan_list.base_freq;
+        band->channels.resize(0);
+        for (size_t chan_idx = 0; chan_idx < sizeof(chan_list.channels); chan_idx++) {
+            if (chan_list.channels[chan_idx] != 0) {
+                band->channels.push_back(chan_list.channels[chan_idx]);
+            }
+        }
+        resp->bands.push_back(std::move(band));
+    }
+
+    size_t buf_len = sizeof(ServiceHeader) + resp->GetSerializedSize();
+    fbl::unique_ptr<Buffer> buffer = GetBuffer(buf_len);
+    if (buffer == nullptr) { return ZX_ERR_NO_RESOURCES; }
+
+    auto packet = fbl::unique_ptr<Packet>(new Packet(std::move(buffer), buf_len));
+    packet->set_peer(Packet::Peer::kService);
+    zx_status_t status = SerializeServiceMsg(packet.get(), Method::DEVICE_QUERY_confirm, resp);
+    if (status != ZX_OK) {
+        errorf("could not serialize DeviceQueryResponse: %d\n", status);
+        return status;
+    }
+
+    return device_->SendService(std::move(packet));
+}
+
 zx_status_t Dispatcher::PreChannelChange(wlan_channel_t chan) {
     debugfn();
-    mlme_->PreChannelChange(chan);
+    if (mlme_ != nullptr) { mlme_->PreChannelChange(chan); }
     return ZX_OK;
 }
 
 zx_status_t Dispatcher::PostChannelChange() {
     debugfn();
-    mlme_->PostChannelChange();
+    if (mlme_ != nullptr) { mlme_->PostChannelChange(); }
     return ZX_OK;
 }
 

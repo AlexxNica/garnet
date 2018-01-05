@@ -2,12 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef GARNET_BIN_UI_SKETCHY_RESOURCES_STROKE_GROUP_H_
+#define GARNET_BIN_UI_SKETCHY_RESOURCES_STROKE_GROUP_H_
 
 #include <set>
-#include "garnet/bin/ui/sketchy/buffer.h"
+#include "garnet/bin/ui/sketchy/buffer/mesh_buffer.h"
 #include "garnet/bin/ui/sketchy/frame.h"
-#include "garnet/bin/ui/sketchy/resources/mesh_buffer.h"
 #include "garnet/bin/ui/sketchy/resources/resource.h"
 #include "garnet/bin/ui/sketchy/resources/stroke.h"
 #include "lib/escher/geometry/bounding_box.h"
@@ -24,13 +24,12 @@ class StrokeGroup final : public Resource {
   static const ResourceTypeInfo kTypeInfo;
   const ResourceTypeInfo& type_info() const override { return kTypeInfo; }
 
-  StrokeGroup(scenic_lib::Session* session,
-              escher::BufferFactory* buffer_factory);
+  explicit StrokeGroup(scenic_lib::Session* session);
 
   // Record the stroke to add.
   bool AddStroke(StrokePtr stroke);
-  // TODO(MZ-269): Implement.
-  // bool RemoveStroke(StrokePtr stroke);
+  // Remove a stroke from record.
+  bool RemoveStroke(StrokePtr stroke);
 
   void SetNeedsReTessellation() { needs_re_tessellation_ = true; }
 
@@ -59,3 +58,5 @@ class StrokeGroup final : public Resource {
 };
 
 }  // namespace sketchy_service
+
+#endif  // GARNET_BIN_UI_SKETCHY_RESOURCES_STROKE_GROUP_H_

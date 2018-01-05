@@ -80,7 +80,12 @@ public:
 
     // MsdArmConnection::Owner implementation.
     void ScheduleAtom(std::shared_ptr<MsdArmAtom> atom) override;
+    void CancelAtoms(std::shared_ptr<MsdArmConnection> connection) override;
     AddressSpaceObserver* GetAddressSpaceObserver() override { return address_manager_.get(); }
+    ArmMaliCacheCoherencyStatus cache_coherency_status() override
+    {
+        return cache_coherency_status_;
+    }
 
     magma_status_t QueryInfo(uint64_t id, uint64_t* value_out);
 
@@ -99,6 +104,7 @@ private:
     class GpuInterruptRequest;
     class JobInterruptRequest;
     class ScheduleAtomRequest;
+    class CancelAtomsRequest;
 
     RegisterIo* register_io() override
     {
@@ -116,15 +122,19 @@ private:
     void EnableInterrupts();
     void DisableInterrupts();
     void EnqueueDeviceRequest(std::unique_ptr<DeviceRequest> request, bool enqueue_front = false);
+    void SuspectedGpuHang();
     magma::Status ProcessDumpStatusToLog();
     magma::Status ProcessGpuInterrupt();
     magma::Status ProcessJobInterrupt();
     magma::Status ProcessScheduleAtom(std::shared_ptr<MsdArmAtom> atom);
+    magma::Status ProcessCancelAtoms(std::weak_ptr<MsdArmConnection> connection);
 
     void ExecuteAtomOnDevice(MsdArmAtom* atom, RegisterIo* registers);
 
     void RunAtom(MsdArmAtom* atom) override;
-    void AtomCompleted(MsdArmAtom* atom) override;
+    void AtomCompleted(MsdArmAtom* atom, ArmMaliResultCode result) override;
+    void HardStopAtom(MsdArmAtom* atom) override;
+    magma::PlatformPort* GetPlatformPort() override;
 
     static const uint32_t kMagic = 0x64657669; //"devi"
 
@@ -138,6 +148,7 @@ private:
     std::thread mmu_interrupt_thread_;
 
     std::unique_ptr<magma::PlatformSemaphore> device_request_semaphore_;
+    std::unique_ptr<magma::PlatformPort> device_port_;
     std::mutex device_request_mutex_;
     std::list<std::unique_ptr<DeviceRequest>> device_request_list_;
 
@@ -148,6 +159,7 @@ private:
     std::unique_ptr<magma::PlatformInterrupt> mmu_interrupt_;
 
     GpuFeatures gpu_features_;
+    ArmMaliCacheCoherencyStatus cache_coherency_status_ = kArmMaliCacheCoherencyNone;
 
     std::unique_ptr<PowerManager> power_manager_;
     std::unique_ptr<AddressManager> address_manager_;

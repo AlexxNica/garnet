@@ -21,8 +21,9 @@
 #define PCI_DEVICE_VIRTIO_BLOCK     2u
 #define PCI_DEVICE_VIRTIO_GPU       3u
 #define PCI_DEVICE_VIRTIO_INPUT     4u
+#define PCI_DEVICE_VIRTIO_NET       5u
 #define PCI_DEVICE_INVALID          UINT16_MAX
-#define PCI_MAX_DEVICES             5u
+#define PCI_MAX_DEVICES             6u
 #define PCI_MAX_BARS                2u
 
 // PCI configuration constants.
@@ -32,7 +33,6 @@
 #define PCI_VENDOR_ID_INTEL         0x8086u
 #define PCI_DEVICE_ID_INTEL_Q35     0x29c0u
 #define PCI_CLASS_BRIDGE_HOST       0x0600u
-#define PCI_CLASS_MASS_STORAGE      0x0100u
 
 // PCI type 1 address manipulation.
 #define PCI_TYPE1_BUS(addr)         (((addr) >> 16) & 0xff)
@@ -207,13 +207,7 @@ class PciEcamHandler : public IoHandler {
 
 class PciBus {
  public:
-  // Base address in PIO space to map device BAR registers.
-  static const uint32_t kPioBarBase = 0x8000;
-
-  // Base address in MMIO space to map device BAR registers.
-  static const uint32_t kMmioBarBase = kPciMmioBarPhysBase;
-
-  PciBus(Guest* guest, const InterruptController* interrupt_controller);
+  PciBus(Guest* guest, InterruptController* interrupt_controller);
 
   zx_status_t Init();
 
@@ -238,7 +232,7 @@ class PciBus {
   zx_status_t WriteIoPort(uint64_t port, const IoValue& value);
 
   // Raise an interrupt for the given device.
-  zx_status_t Interrupt(const PciDevice& device) const;
+  zx_status_t Interrupt(const PciDevice& device);
 
   // Returns true if |bus|, |device|, |function| corresponds to a valid
   // device address.
@@ -266,13 +260,13 @@ class PciBus {
   // Devices on the virtual PCI bus.
   PciDevice* device_[PCI_MAX_DEVICES] = {};
   // IO APIC for use with interrupt redirects.
-  const InterruptController* interrupt_controller_ = nullptr;
+  InterruptController* interrupt_controller_ = nullptr;
   // Embedded root complex device.
   PciDevice root_complex_;
   // Next pio window to be allocated to connected devices.
-  uint32_t pio_base_ = kPioBarBase;
+  uint32_t pio_base_ = 0x8000;
   // Next mmio window to be allocated to connected devices.
-  uint32_t mmio_base_ = kMmioBarBase;
+  uint32_t mmio_base_ = kPciMmioBarPhysBase;
 };
 
 }  // namespace machina

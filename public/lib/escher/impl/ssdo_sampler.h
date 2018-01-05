@@ -32,10 +32,6 @@ class SsdoSampler {
   // Must match the fragment shader in ssdo_sampler.cc
   constexpr static uint32_t kSsdoAccelDownsampleFactor = 8;
 
-  // TODO: eR8G8Srgb would be preferable, but must check if it is supported.
-  // TODO: validate this choice via performance profiling.
-  const static vk::Format kColorFormat = vk::Format::eR8G8Unorm;
-
   struct SamplerConfig {
     vec4 key_light;
     vec3 viewing_volume;
@@ -58,6 +54,8 @@ class SsdoSampler {
               ModelData* model_data);
   ~SsdoSampler();
 
+  vk::Format color_format() const { return color_format_; }
+
   // Stochastic sampling to determine obscurance.  The output requires filtering
   // to reduce noise.
   void Sample(CommandBuffer* command_buffer,
@@ -65,16 +63,6 @@ class SsdoSampler {
               const TexturePtr& depth_texture,
               const TexturePtr& accelerator_texture,
               const SamplerConfig* push_constants);
-
-  // Same algorithm as Sample(), implemented with a compute kernel instead of
-  // a fragment shader.  Currently very inefficient, but keeping around for
-  // experimentation: it seems that there's no fundamental reason that this
-  // version cannot exceed the performance of the fragment shader version.
-  // TODO: improve or delete.
-  void SampleUsingKernel(CommandBuffer* command_buffer,
-                         const TexturePtr& depth_texture,
-                         const TexturePtr& output_texture,
-                         const SamplerConfig* push_constants);
 
   // Filter the noisy output from Sample().  This should be called twice, to
   // filter in a horizontal and a vertical direction (the direction is selected
@@ -91,13 +79,13 @@ class SsdoSampler {
 
  private:
   const vk::Device device_;
+  const vk::Format color_format_;
   DescriptorSetPool pool_;
   MeshPtr full_screen_;
   TexturePtr noise_texture_;
   vk::RenderPass render_pass_;
   PipelinePtr sampler_pipeline_;
   PipelinePtr filter_pipeline_;
-  ComputeShader sampler_kernel_;
 };
 
 }  // namespace impl

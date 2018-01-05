@@ -10,43 +10,49 @@ executable("bin") {
   sources = [
     "efi.cc",
     "guest.cc",
+    "guest_view.cc",
+    "guest_view.h",
     "linux.cc",
     "zircon.cc",
   ]
 
   deps = [
     "//garnet/lib/machina",
+    "//garnet/public/lib/ui/view_framework:view_provider",
     "//zircon/system/ulib/fbl",
+    "//zircon/third_party/lib/fdt",
   ]
 
-  libs = [
-    "hypervisor",
-  ]
+  libs = [ "hypervisor" ]
 }
 
 package("guest") {
-  system_image = true
-
   deps = [
     ":bin",
   ]
 
-  binaries = [{
-    name = "guest"
-  }]
+  binary = "guest"
 
-  if (current_cpu == "x64") {
+  meta = [ {
+        path = rebase_path("meta/sandbox")
+        dest = "sandbox"
+      } ]
+
+  if (target_cpu == "arm64") {
+    resources = [ {
+          path = rebase_path("//garnet/lib/machina/arch/arm64/dts/board.dtb")
+          dest = "board.dtb"
+        } ]
+  } else if (current_cpu == "x64") {
     resources = [
       {
-        path = rebase_path("//garnet/lib/machina/arch/x86/acpi/dsdt.aml")
+        path = rebase_path("//garnet/lib/machina/arch/x86/asl/dsdt.aml")
         dest = "dsdt.aml"
-      }, {
-        path = rebase_path("//garnet/lib/machina/arch/x86/acpi/madt.aml")
-        dest = "madt.aml"
-      }, {
-        path = rebase_path("//garnet/lib/machina/arch/x86/acpi/mcfg.aml")
+      },
+      {
+        path = rebase_path("//garnet/lib/machina/arch/x86/asl/mcfg.aml")
         dest = "mcfg.aml"
-      }
+      },
     ]
   }
 }

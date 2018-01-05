@@ -9,6 +9,8 @@
 #include "magma_util/dlog.h"
 #include "magma_util/macros.h"
 #include "magma_vendor_queries.h"
+#include "platform_port.h"
+#include "platform_trace.h"
 #include <bitset>
 #include <cstdio>
 #include <ddk/debug.h>
@@ -65,6 +67,19 @@ protected:
     }
 
     std::shared_ptr<MsdArmAtom> atom_;
+};
+
+class MsdArmDevice::CancelAtomsRequest : public DeviceRequest {
+public:
+    CancelAtomsRequest(std::shared_ptr<MsdArmConnection> connection) : connection_(connection) {}
+
+protected:
+    magma::Status Process(MsdArmDevice* device) override
+    {
+        return device->ProcessCancelAtoms(connection_);
+    }
+
+    std::weak_ptr<MsdArmConnection> connection_;
 };
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -146,9 +161,16 @@ bool MsdArmDevice::Init(void* device_handle)
     gpu_features_.ReadFrom(register_io_.get());
     magma::log(magma::LOG_INFO, "ARM mali ID %x", gpu_features_.gpu_id.reg_value());
 
-    device_request_semaphore_ = magma::PlatformSemaphore::Create();
+#if defined(MSD_ARM_ENABLE_CACHE_COHERENCY)
+    if (!gpu_features_.coherency_features.ace().get())
+        return DRETF(false, "ACE cache coherency not available");
+    cache_coherency_status_ = kArmMaliCacheCoherencyAce;
+#endif
 
-    power_manager_ = std::make_unique<PowerManager>();
+    device_request_semaphore_ = magma::PlatformSemaphore::Create();
+    device_port_ = magma::PlatformPort::Create();
+
+    power_manager_ = std::make_unique<PowerManager>(register_io_.get());
 
     scheduler_ = std::make_unique<JobScheduler>(this, 3);
     address_manager_ = std::make_unique<AddressManager>(this, gpu_features_.address_space_count);
@@ -158,7 +180,11 @@ bool MsdArmDevice::Init(void* device_handle)
 
     EnableInterrupts();
 
-    power_manager_->EnableCores(register_io_.get());
+    uint64_t enabled_cores = 1;
+#if defined(MSD_ARM_ENABLE_ALL_CORES)
+    enabled_cores = gpu_features_.shader_present;
+#endif
+    power_manager_->EnableCores(register_io_.get(), enabled_cores);
     return true;
 }
 
@@ -168,6 +194,13 @@ std::shared_ptr<MsdArmConnection> MsdArmDevice::Open(msd_client_id_t client_id)
 }
 
 void MsdArmDevice::DumpStatusToLog() { EnqueueDeviceRequest(std::make_unique<DumpRequest>()); }
+
+void MsdArmDevice::SuspectedGpuHang()
+{
+    magma::log(magma::LOG_WARNING, "Possible GPU hang\n");
+    ProcessDumpStatusToLog();
+    scheduler_->KillTimedOutAtoms();
+}
 
 int MsdArmDevice::DeviceThreadLoop()
 {
@@ -179,23 +212,43 @@ int MsdArmDevice::DeviceThreadLoop()
     DLOG("DeviceThreadLoop starting thread 0x%lx", device_thread_id_->id());
 
     std::unique_lock<std::mutex> lock(device_request_mutex_, std::defer_lock);
+    device_request_semaphore_->WaitAsync(device_port_.get());
 
-    while (true) {
-        device_request_semaphore_->Wait();
-
-        while (true) {
-            lock.lock();
-            if (!device_request_list_.size())
-                break;
-            auto request = std::move(device_request_list_.front());
-            device_request_list_.pop_front();
-            lock.unlock();
-            request->ProcessAndReply(this);
+    while (!device_thread_quit_flag_) {
+        auto timeout_duration = scheduler_->GetCurrentTimeoutDuration();
+        if (timeout_duration <= JobScheduler::Clock::duration::zero()) {
+            SuspectedGpuHang();
+            continue;
         }
-        lock.unlock();
-
-        if (device_thread_quit_flag_)
-            break;
+        uint64_t key;
+        magma::Status status(MAGMA_STATUS_OK);
+        if (timeout_duration < JobScheduler::Clock::duration::max()) {
+            // Add 1 to avoid rounding time down and spinning with timeouts close to 0.
+            int64_t millisecond_timeout =
+                std::chrono::duration_cast<std::chrono::milliseconds>(timeout_duration).count() + 1;
+            status = device_port_->Wait(&key, millisecond_timeout);
+        } else {
+            status = device_port_->Wait(&key);
+        }
+        if (status.ok()) {
+            if (key == device_request_semaphore_->id()) {
+                device_request_semaphore_->Reset();
+                device_request_semaphore_->WaitAsync(device_port_.get());
+                while (!device_thread_quit_flag_) {
+                    lock.lock();
+                    if (!device_request_list_.size()) {
+                        lock.unlock();
+                        break;
+                    }
+                    auto request = std::move(device_request_list_.front());
+                    device_request_list_.pop_front();
+                    lock.unlock();
+                    request->ProcessAndReply(this);
+                }
+            } else {
+                scheduler_->PlatformPortSignaled(key);
+            }
+        }
     }
 
     DLOG("DeviceThreadLoop exit");
@@ -240,6 +293,12 @@ magma::Status MsdArmDevice::ProcessGpuInterrupt()
         irq_status.power_changed_single().set(0);
         irq_status.power_changed_all().set(0);
         power_manager_->ReceivedPowerInterrupt(register_io_.get());
+        if (power_manager_->l2_ready_status() &&
+            (cache_coherency_status_ == kArmMaliCacheCoherencyAce)) {
+            auto enable_reg = registers::CoherencyFeatures::GetEnable().FromValue(0);
+            enable_reg.ace().set(true);
+            enable_reg.WriteTo(register_io_.get());
+        }
     }
 
     if (irq_status.reg_value()) {
@@ -272,8 +331,39 @@ int MsdArmDevice::JobInterruptThreadLoop()
     return 0;
 }
 
+static bool IsHardwareResultCode(uint32_t result)
+{
+    switch (result) {
+        case kArmMaliResultSuccess:
+        case kArmMaliResultAtomTerminated:
+
+        case kArmMaliResultConfigFault:
+        case kArmMaliResultPowerFault:
+        case kArmMaliResultReadFault:
+        case kArmMaliResultWriteFault:
+        case kArmMaliResultAffinityFault:
+        case kArmMaliResultBusFault:
+
+        case kArmMaliResultProgramCounterInvalidFault:
+        case kArmMaliResultEncodingInvalidFault:
+        case kArmMaliResultTypeMismatchFault:
+        case kArmMaliResultOperandFault:
+        case kArmMaliResultTlsFault:
+        case kArmMaliResultBarrierFault:
+        case kArmMaliResultAlignmentFault:
+        case kArmMaliResultDataInvalidFault:
+        case kArmMaliResultTileRangeFault:
+        case kArmMaliResultOutOfMemoryFault:
+            return true;
+
+        default:
+            return false;
+    }
+}
+
 magma::Status MsdArmDevice::ProcessJobInterrupt()
 {
+    TRACE_DURATION("magma", "MsdArmDevice::ProcessJobInterrupt");
     auto irq_status = registers::JobIrqFlags::GetStatus().ReadFrom(register_io_.get());
     auto clear_flags = registers::JobIrqFlags::GetIrqClear().FromValue(irq_status.reg_value());
     clear_flags.WriteTo(register_io_.get());
@@ -285,10 +375,21 @@ magma::Status MsdArmDevice::ProcessJobInterrupt()
         ProcessDumpStatusToLog();
     }
 
+    uint32_t failed = irq_status.failed_slots().get();
+    while (failed) {
+        uint32_t slot = __builtin_ffs(failed) - 1;
+        registers::JobSlotRegisters regs(slot);
+        uint32_t result = regs.Status().ReadFrom(register_io_.get()).reg_value();
+
+        DASSERT(IsHardwareResultCode(result));
+        scheduler_->JobCompleted(slot, static_cast<ArmMaliResultCode>(result));
+        failed &= ~(1 << slot);
+    }
+
     uint32_t finished = irq_status.finished_slots().get();
     while (finished) {
-        uint32_t slot = ffs(finished) - 1;
-        scheduler_->JobCompleted(slot);
+        uint32_t slot = __builtin_ffs(finished) - 1;
+        scheduler_->JobCompleted(slot, kArmMaliResultSuccess);
         finished &= ~(1 << slot);
     }
 
@@ -400,6 +501,13 @@ void MsdArmDevice::ScheduleAtom(std::shared_ptr<MsdArmAtom> atom)
     EnqueueDeviceRequest(std::make_unique<ScheduleAtomRequest>(std::move(atom)));
 }
 
+void MsdArmDevice::CancelAtoms(std::shared_ptr<MsdArmConnection> connection)
+{
+    EnqueueDeviceRequest(std::make_unique<CancelAtomsRequest>(connection));
+}
+
+magma::PlatformPort* MsdArmDevice::GetPlatformPort() { return device_port_.get(); }
+
 void MsdArmDevice::DumpRegisters(const GpuFeatures& features, RegisterIo* io, DumpState* dump_state)
 {
     static struct {
@@ -487,8 +595,17 @@ magma::Status MsdArmDevice::ProcessDumpStatusToLog()
 
 magma::Status MsdArmDevice::ProcessScheduleAtom(std::shared_ptr<MsdArmAtom> atom)
 {
+    TRACE_DURATION("magma", "MsdArmDevice::ProcessScheduleAtom");
     scheduler_->EnqueueAtom(std::move(atom));
     scheduler_->TryToSchedule();
+    return MAGMA_STATUS_OK;
+}
+
+magma::Status MsdArmDevice::ProcessCancelAtoms(std::weak_ptr<MsdArmConnection> connection)
+{
+    // It's fine to cancel with an invalid shared_ptr, as that will clear out
+    // atoms for connections that are dead already.
+    scheduler_->CancelAtomsForConnection(connection.lock());
     return MAGMA_STATUS_OK;
 }
 
@@ -499,13 +616,13 @@ void MsdArmDevice::ExecuteAtomOnDevice(MsdArmAtom* atom, RegisterIo* register_io
 
     if (!atom->gpu_address()) {
         // Dependency-only jobs have a 0 gpu address, so skip them.
-        scheduler_->JobCompleted(atom->slot());
+        scheduler_->JobCompleted(atom->slot(), kArmMaliResultSuccess);
         return;
     }
 
     // Skip atom if address space can't be assigned.
     if (!address_manager_->AssignAddressSpace(atom)) {
-        scheduler_->JobCompleted(atom->slot());
+        scheduler_->JobCompleted(atom->slot(), kArmMaliResultAtomTerminated);
         return;
     }
 
@@ -521,21 +638,30 @@ void MsdArmDevice::ExecuteAtomOnDevice(MsdArmAtom* atom, RegisterIo* register_io
     config.end_flush_invalidate().set(true);
     config.WriteTo(register_io);
 
-    // Execute on core 0, the only one powered on.
-    slot.AffinityNext().FromValue(1).WriteTo(register_io);
+    // Execute on every powered-on core.
+    slot.AffinityNext().FromValue(power_manager_->shader_ready_status()).WriteTo(register_io);
     slot.CommandNext().FromValue(registers::JobSlotCommand::kCommandStart).WriteTo(register_io);
 }
 
 void MsdArmDevice::RunAtom(MsdArmAtom* atom) { ExecuteAtomOnDevice(atom, register_io_.get()); }
 
-void MsdArmDevice::AtomCompleted(MsdArmAtom* atom)
+void MsdArmDevice::AtomCompleted(MsdArmAtom* atom, ArmMaliResultCode result)
 {
     DLOG("Completed job atom: 0x%lx\n", atom->gpu_address());
     address_manager_->AtomFinished(atom);
     atom->set_finished();
     auto connection = atom->connection().lock();
     if (connection)
-        connection->SendNotificationData(atom, kArmMaliResultSuccess);
+        connection->SendNotificationData(atom, result);
+}
+
+void MsdArmDevice::HardStopAtom(MsdArmAtom* atom)
+{
+    DASSERT(atom->hard_stopped());
+    registers::JobSlotRegisters slot(atom->slot());
+    slot.Command()
+        .FromValue(registers::JobSlotCommand::kCommandHardStop)
+        .WriteTo(register_io_.get());
 }
 
 magma_status_t MsdArmDevice::QueryInfo(uint64_t id, uint64_t* value_out)
@@ -583,6 +709,10 @@ magma_status_t MsdArmDevice::QueryInfo(uint64_t id, uint64_t* value_out)
 
         case kMsdArmVendorQueryMmuFeatures:
             *value_out = gpu_features_.mmu_features.reg_value();
+            return MAGMA_STATUS_OK;
+
+        case kMsdArmVendorQueryCoherencyEnabled:
+            *value_out = cache_coherency_status_;
             return MAGMA_STATUS_OK;
 
         default:

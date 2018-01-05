@@ -244,113 +244,6 @@ constexpr char g_filter_fragment_src[] = R"GLSL(
   }
 )GLSL";
 
-// TODO: this is currently EXTREMELY slow: see comment on SampleUsingKernel().
-constexpr char g_sampler_kernel_src[] = R"GLSL(
-#version 450
-#extension GL_ARB_separate_shader_objects : enable
-
-layout(local_size_x = 4, local_size_y = 4) in;
-
-layout (binding = 0) uniform sampler2D depthTexture;
-layout (binding = 1, rgba8) uniform image2D resultImage;
-layout (binding = 2, rgba8) uniform image2D noiseImage;
-
-// Uniform parameters.
-layout(push_constant) uniform SamplerConfig {
-  // A description of the directional key light:
-  //
-  //  * theta, phi: The direction from which the light is received. The first
-  //    coordinate is theta (the the azimuthal angle, in radians) and the second
-  //    coordinate is phi (the polar angle, in radians).
-  //  * dispersion: The angular variance in the light, in radians.
-  //  * intensity: The amount of light emitted.
-  vec4 key_light;
-
-  // The size of the viewing volume in (width, height, depth).
-  vec3 viewing_volume;
-} pushed;
-
-const float kPi = 3.14159265359;
-
-// Must match SsdoSampler::kNoiseSize (C++).
-const int kNoiseSize = 5;
-
-// The number of screen-space samples to use in the computation.
-const int kTapCount = 8;
-
-// These should be relatively primary to each other and to kTapCount;
-// TODO: only kSpirals.x is used... should .y also be used?
-const vec2 kSpirals = vec2(7.0, 5.0);
-
-// TODO(abarth): Make the shader less sensitive to this parameter.
-const float kSampleRadius = 16.0;  // screen pixels.
-
-float sampleKeyIllumination(vec2 pos,
-                            float fragment_z,
-                            float alpha,
-                            vec2 seed) {
-  float key_light_dispersion = pushed.key_light.z;
-  vec2 key_light0 = pushed.key_light.xy - key_light_dispersion / 2.0;
-  float theta = key_light0.x + fract(seed.x + alpha * kSpirals.x) * key_light_dispersion;
-  float radius = alpha * kSampleRadius;
-
-  float raw_depth = texture(depthTexture,
-                            pos + radius * vec2(cos(theta), sin(theta))).r;
-  float tap_z = raw_depth * -pushed.viewing_volume.z;
-
-  // TODO: use clamp here, once we can use GLSL standard library.
-  return 1.0 - max(0.0, (tap_z - fragment_z) / radius);
-}
-
-float sampleFillIllumination(vec2 pos,
-                             float fragment_z,
-                             float alpha,
-                             vec2 seed) {
-  float theta = 2.0 * kPi * (seed.x + alpha * kSpirals.x);
-  float radius = alpha * kSampleRadius;
-
-  float raw_depth = texture(depthTexture,
-                            pos + radius * vec2(cos(theta), sin(theta))).r;
-  float tap_z = raw_depth * -pushed.viewing_volume.z;
-
-  return 1.0 - max(0.0, (tap_z - fragment_z) / radius);
-}
-
-// Size of square region that is computed by each invocation of the kernel.
-const int kSize = 4;
-void main() {
-  uint x = gl_GlobalInvocationID.x * kSize;
-  uint y = gl_GlobalInvocationID.y * kSize;
-
-  for (int xx = 0; xx < kSize; ++xx) {
-    for (int yy = 0; yy < kSize; ++yy) {
-      vec2 pos = vec2(x + xx, y + yy);
-      vec2 seed = imageLoad(noiseImage,
-                            ivec2(fract(pos / float(kNoiseSize)).rg)).rg;
-
-      float sampled_depth = texture(depthTexture, pos).r;
-      float fragment_z = sampled_depth * -pushed.viewing_volume.z;
-      float key_light_intensity = pushed.key_light.w;
-      float fill_light_intensity = 1.0 - key_light_intensity;
-
-      float L = 0.0;
-      for (int i = 0; i < kTapCount; ++i) {
-        float alpha = (float(i) + 0.5) / float(kTapCount);
-        L += key_light_intensity * sampleKeyIllumination(pos, fragment_z, alpha, seed);
-        L += fill_light_intensity * sampleFillIllumination(pos, fragment_z, alpha, seed);
-      }
-      L = clamp(L / float(kTapCount), 0.0, 1.0);
-
-      // TODO: This ensures that shadows aren't pure-black.  Replace this with
-      // something more principled/controllable.
-      L = L * 0.75 + 0.25;
-
-      imageStore(resultImage, ivec2(pos), vec4(L, sampled_depth, 0.0, 1.0));
-    }
-  }
-}
-)GLSL";
-
 // TODO: refactor this into a PipelineBuilder class.
 std::pair<PipelinePtr, PipelinePtr> CreatePipelines(
     vk::Device device,
@@ -540,7 +433,24 @@ std::pair<PipelinePtr, PipelinePtr> CreatePipelines(
   return {sampler_pipeline, filter_pipeline};
 }
 
-vk::RenderPass CreateRenderPass(vk::Device device) {
+vk::Format ChooseColorFormat(vk::PhysicalDevice physical_device) {
+  // TODO: eR8G8Srgb would be preferable, but must check if it is supported.
+  // TODO: validate this choice via performance profiling.
+  vk::Format color_formats[] = {vk::Format::eR8G8Unorm,
+                                vk::Format::eR8G8B8A8Unorm};
+  for (auto format : color_formats) {
+    vk::FormatProperties properties;
+    physical_device.getFormatProperties(format, &properties);
+    if (properties.optimalTilingFeatures &
+        vk::FormatFeatureFlagBits::eStorageImage)
+      return format;
+  }
+
+  FXL_DCHECK(false);
+  return vk::Format::eUndefined;
+}
+
+vk::RenderPass CreateRenderPass(vk::Device device, vk::Format color_format) {
   constexpr uint32_t kAttachmentCount = 1;
   vk::AttachmentDescription attachments[kAttachmentCount];
 
@@ -548,7 +458,7 @@ vk::RenderPass CreateRenderPass(vk::Device device) {
   // one from a previous pass will be provided to the shader as a texture).
   const uint32_t kColorAttachment = 0;
   auto& color_attachment = attachments[kColorAttachment];
-  color_attachment.format = SsdoSampler::kColorFormat;
+  color_attachment.format = color_format;
   color_attachment.samples = vk::SampleCountFlagBits::e1;
   color_attachment.loadOp = vk::AttachmentLoadOp::eClear;
   color_attachment.storeOp = vk::AttachmentStoreOp::eStore;
@@ -617,6 +527,7 @@ SsdoSampler::SsdoSampler(Escher* escher,
                          ImagePtr noise_image,
                          ModelData* model_data)
     : device_(escher->vulkan_context().device),
+      color_format_(ChooseColorFormat(escher->vk_physical_device())),
       pool_(escher, GetDescriptorSetLayoutCreateInfo(), 6),
       full_screen_(full_screen),
       noise_texture_(fxl::MakeRefCounted<Texture>(escher->resource_recycler(),
@@ -624,13 +535,7 @@ SsdoSampler::SsdoSampler(Escher* escher,
                                                   vk::Filter::eNearest)),
       // TODO: VulkanProvider should know the swapchain format and we should use
       // it.
-      render_pass_(CreateRenderPass(device_)),
-      sampler_kernel_(escher,
-                      {vk::ImageLayout::eShaderReadOnlyOptimal,
-                       vk::ImageLayout::eGeneral, vk::ImageLayout::eGeneral},
-                      {},
-                      sizeof(SamplerConfig),
-                      g_sampler_kernel_src) {
+      render_pass_(CreateRenderPass(device_, color_format_)) {
   FXL_DCHECK(noise_image->width() == kNoiseSize &&
              noise_image->height() == kNoiseSize);
 
@@ -758,25 +663,6 @@ void SsdoSampler::Sample(CommandBuffer* command_buffer,
   command_buffer->EndRenderPass();
 }
 
-// TODO: this is currently EXTREMELY slow.  We need to dispatch far fewer
-// threads, but dispatching 1/16th as many (as we would if we batched 4x4
-// regions) is still very slow, even without modifying the kernel to do 16x as
-// much work in each invocation!  Something else is wrong, and figuring out what
-// probably needs better tools.  For now, the fragment shader version should be
-// used instead.
-void SsdoSampler::SampleUsingKernel(CommandBuffer* command_buffer,
-                                    const TexturePtr& depth_texture,
-                                    const TexturePtr& output_texture,
-                                    const SamplerConfig* push_constants) {
-  FXL_DCHECK(depth_texture->width() == output_texture->width());
-  FXL_DCHECK(depth_texture->height() == output_texture->height());
-  uint32_t width = depth_texture->width();
-  uint32_t height = depth_texture->width();
-
-  sampler_kernel_.Dispatch({depth_texture, output_texture, noise_texture_}, {},
-                           command_buffer, width, height, 1, push_constants);
-}
-
 void SsdoSampler::Filter(CommandBuffer* command_buffer,
                          const FramebufferPtr& framebuffer,
                          const TexturePtr& unfiltered_illumination,
@@ -852,7 +738,7 @@ void SsdoSampler::Filter(CommandBuffer* command_buffer,
 }
 
 SsdoSampler::SamplerConfig::SamplerConfig(const Stage& stage)
-    : key_light(vec4(stage.key_light().direction(),
+    : key_light(vec4(stage.key_light().polar_direction(),
                      stage.key_light().dispersion(),
                      stage.key_light().intensity())),
       viewing_volume(vec3(stage.viewing_volume().width(),

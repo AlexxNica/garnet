@@ -5,33 +5,16 @@
 # Use of this source code is governed by a MIT-style
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT
-#
-# Download and build toybox to be an initrd for linux
-# and download and build dash as the system shell.
-#
-# More additions to come as and when desired / needed.
 
 set -eo pipefail
 
 GUEST_SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-# Where the toybox sources are expected to be.
-TOYBOX_SRC_DIR="/tmp/toybox"
-
-# Toybox initrd file.
-TOYBOX_INITRD="$TOYBOX_SRC_DIR/initrd.gz"
-
-# Toybox root filesystem image.
-TOYBOX_ROOTFS="$TOYBOX_SRC_DIR/rootfs.ext2"
-
-# Where to prep the toybox directory structure.
-TOYBOX_SYSROOT="$TOYBOX_SRC_DIR/fs"
-
 # Where the dash sources are expected to be.
 DASH_SRC_DIR="/tmp/dash"
 
 usage() {
-    echo "usage: ${0} [-rif] [-d toybox_dir] [-s dash_dir]"
+    echo "usage: ${0} [-rif] [-d toybox_dir] [-s dash_dir] {arm64, x86}"
     echo ""
     echo "    -r Build ext2 filesystem image."
     echo "    -i Build initrd CPIO archive."
@@ -62,8 +45,7 @@ build_toybox() {
   local sysroot_dir="$2"
 
   make -C "$toybox_src" defconfig
-
-  LDFLAGS="--static" make -C "$toybox_src" -j100
+  CC="gcc" LDFLAGS="--static" make -C "$toybox_src" -j100
 
   mkdir -p "$sysroot_dir"/{bin,sbin,etc,proc,sys,usr/{bin,sbin},dev,tmp}
   PREFIX=$sysroot_dir make -C "$toybox_src" install
@@ -88,28 +70,30 @@ build_dash() {
   local dash_src=$1
   local sysroot_dir="$2"
 
-  ( cd $dash_src && ./autogen.sh && ./configure LDFLAGS="-static" && make )
+  pushd $dash_src
+  ./autogen.sh
+  ./configure CC="${CROSS_COMPILE}gcc" LDFLAGS="-static" --host=arm64-linux-gnueabi
+  make clean  # Required for rebuilds that change arch.
+  make -j100
+  popd
+
   mkdir -p "$sysroot_dir/bin"
-  # TODO(andymutton): Remove the -f when we can disable toysh in the toybox repo
-  cp -f "$dash_src/src/dash" "$sysroot_dir/bin/sh"
+  cp "$dash_src/src/dash" "$sysroot_dir/bin/sh"
 }
 
 # Generate a simple init script at /init in the target sysroot.
 #
-# $1 - Toybox source directory.
-# $2 - Toybox sysroot directory.
+# $1 - Toybox sysroot directory.
 generate_init() {
-  local toybox_src="$1"
-  local sysroot_dir="$2"
+  local sysroot_dir="$1"
 
   # Write an init script for toybox.
   cat > "$sysroot_dir/init" <<'_EOF'
 #!/bin/sh
 mount -t proc none /proc
 mount -t sysfs none /sys
-mount -t devtmpfs none /dev
-echo Launched toybox
-/bin/sh
+echo Launched sysroot
+exec /bin/sh
 _EOF
 
   chmod +x "$sysroot_dir/init"
@@ -122,9 +106,10 @@ _EOF
 package_initrd() {
   local sysroot="$1"
   local initrd="$2"
-  (cd "$sysroot" && find . -print0 \
-    | cpio --null -o --format=newc \
-    | gzip -9 > $initrd)
+
+  pushd "${sysroot}"
+  find . | cpio -oH newc | gzip -9 > "${initrd}"
+  popd
 }
 
 # e2tools provides utilities for manipulating EXT2 filesystems.
@@ -171,14 +156,38 @@ declare BUILD_ROOTFS="${BUILD_ROOTFS:-false}"
 
 while getopts "fird:s:" opt; do
   case "${opt}" in
-    f) FORCE="true" ;;
-    i) BUILD_INITRD="true" ;;
-    r) BUILD_ROOTFS="true" ;;
-    d) TOYBOX_SRC_DIR="${OPTARG}" ;;
-    s) DASH_SRC_DIR="${OPTARG}" ;;
-    *) usage ;;
+  f) FORCE="true" ;;
+  i) BUILD_INITRD="true" ;;
+  r) BUILD_ROOTFS="true" ;;
+  d) TOYBOX_SRC_DIR="${OPTARG}" ;;
+  s) DASH_SRC_DIR="${OPTARG}" ;;
+  *) usage ;;
   esac
 done
+shift $((OPTIND - 1))
+
+case "${1}" in
+arm64)
+  declare -x ARCH=arm64;
+  declare -x CROSS_COMPILE=aarch64-linux-gnu-;;
+x86)
+  declare -x ARCH=x86;
+  declare -x CROSS_COMPILE=x86_64-linux-gnu-;;
+*)
+  usage;;
+esac
+
+# Where the toybox sources are expected to be.
+TOYBOX_SRC_DIR="${TOYBOX_SRC_DIR:-/tmp/toybox-${ARCH}}"
+
+# Toybox initrd file.
+TOYBOX_INITRD="$TOYBOX_SRC_DIR/initrd.gz"
+
+# Toybox root filesystem image.
+TOYBOX_ROOTFS="$TOYBOX_SRC_DIR/rootfs.ext2"
+
+# Where to prep the toybox directory structure.
+TOYBOX_SYSROOT="$TOYBOX_SRC_DIR/fs"
 
 # Do we have something to build?
 if [[ ! "${BUILD_INITRD}" = "true" ]] && [[ ! "${BUILD_ROOTFS}" = "true" ]]; then
@@ -214,7 +223,7 @@ get_dash_source "${DASH_SRC_DIR}"
 
 build_dash "${DASH_SRC_DIR}" "${TOYBOX_SYSROOT}"
 
-generate_init "${TOYBOX_SRC_DIR}" "${TOYBOX_SYSROOT}"
+generate_init "${TOYBOX_SYSROOT}"
 
 if [[ "${BUILD_INITRD}" = "true" ]]; then
   package_initrd "${TOYBOX_SYSROOT}" "${TOYBOX_INITRD}"

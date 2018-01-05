@@ -2,14 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef GARNET_BIN_UI_SKETCHY_RESOURCES_STROKE_H_
+#define GARNET_BIN_UI_SKETCHY_RESOURCES_STROKE_H_
 
 #include "lib/ui/scenic/client/resources.h"
 #include "lib/ui/scenic/client/session.h"
-#include "garnet/bin/ui/sketchy/buffer.h"
+#include "garnet/bin/ui/sketchy/buffer/escher_buffer.h"
+#include "garnet/bin/ui/sketchy/buffer/mesh_buffer.h"
 #include "garnet/bin/ui/sketchy/frame.h"
-#include "garnet/bin/ui/sketchy/resources/mesh_buffer.h"
+#include "garnet/bin/ui/sketchy/resources/divided_stroke_path.h"
 #include "garnet/bin/ui/sketchy/resources/resource.h"
+#include "garnet/bin/ui/sketchy/resources/stroke_fitter.h"
 #include "garnet/bin/ui/sketchy/resources/stroke_path.h"
 #include "garnet/bin/ui/sketchy/resources/stroke_tessellator.h"
 #include "sketchy/stroke_segment.h"
@@ -24,55 +27,40 @@ class Stroke final : public Resource {
   static const ResourceTypeInfo kTypeInfo;
   const ResourceTypeInfo& type_info() const override { return kTypeInfo; }
 
-  Stroke(escher::Escher* escher, StrokeTessellator* tessellator);
+  Stroke(StrokeTessellator* tessellator, escher::BufferFactory* buffer_factory);
   bool SetPath(std::unique_ptr<StrokePath> path);
 
-  // Record the command to tessellate and merge the mesh into a larger
-  // |mesh_buffer|.
-  void TessellateAndMergeWithGpu(Frame* frame, MeshBuffer* mesh_buffer);
-  // TODO(MZ-269): Remove this when Gpu tessellation is stable.
-  void TessellateAndMergeWithCpu(Frame* frame, MeshBuffer* mesh_buffer);
+  bool Begin(glm::vec2 pt);
+  bool Extend(const std::vector<glm::vec2>& sampled_pts);
+  bool Finish();
 
-  uint32_t vertex_count() const { return vertex_count_; }
-  uint32_t index_count() const { return index_count_; }
+  // Record the command to tessellate and merge the mesh into a larger
+  // |mesh_buffer|. Base vertex index will be updated per frame in the uniform
+  // buffer, so the order change in |mesh_buffer| won't matter.
+  void TessellateAndMerge(Frame* frame, MeshBuffer* mesh_buffer);
+
+  uint32_t vertex_count() const { return path_.vertex_count(); }
+  uint32_t index_count() const { return path_.index_count(); }
 
  private:
-  escher::BufferPtr GetOrCreateUniformBuffer(
-      escher::impl::CommandBuffer* command,
-      escher::BufferFactory* buffer_factory,
-      escher::BufferPtr& buffer, const void* data, size_t size);
-  escher::BufferPtr GetOrCreateStorageBuffer(
-      escher::impl::CommandBuffer* command,
-      escher::BufferFactory* buffer_factory,
-      escher::BufferPtr& buffer, const void* data, size_t size);
-  // Fore each division, fill its segment index in |division_segment_indices_|.
-  // This is a workaround solution to avoid dynamic branching in shader.
-  void PrepareDivisionSegmentIndices();
-
-  escher::Escher* const escher_;
   StrokeTessellator* const tessellator_;
+  std::unique_ptr<StrokeFitter> fitter_;
 
-  std::unique_ptr<StrokePath> path_;
-  escher::BoundingBox bbox_;
-  std::vector<uint32_t> vertex_counts_;
-  uint32_t vertex_count_ = 0;
-  uint32_t index_count_ = 0;
-
-  uint32_t division_count_ = 0;
-  std::vector<uint32_t> division_counts_;
-  // Accumulates the previous (self exclusive) division counts.
-  std::vector<uint32_t> cumulative_division_counts_;
-  // Pre-computes the segment indices for divisions.
-  std::vector<uint32_t> division_segment_indices_;
+  DividedStrokePath path_;
+  DividedStrokePath delta_path_;
+  // True if either path is reset or extended.
+  bool is_path_updated_ = false;
 
   escher::BufferPtr stroke_info_buffer_;
-  escher::BufferPtr control_points_buffer_;
-  escher::BufferPtr re_params_buffer_;
-  escher::BufferPtr division_counts_buffer_;
-  escher::BufferPtr cumulative_division_counts_buffer_;
-  escher::BufferPtr division_segment_index_buffer_;
+  EscherBuffer control_points_buffer_;
+  EscherBuffer re_params_buffer_;
+  EscherBuffer division_counts_buffer_;
+  EscherBuffer cumulative_division_counts_buffer_;
+  EscherBuffer division_segment_index_buffer_;
 
   FXL_DISALLOW_COPY_AND_ASSIGN(Stroke);
 };
 
 }  // namespace sketchy_service
+
+#endif  // GARNET_BIN_UI_SKETCHY_RESOURCES_STROKE_H_

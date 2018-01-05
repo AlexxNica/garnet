@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef GARNET_BIN_UI_SCENE_MANAGER_ENGINE_ENGINE_H_
+#define GARNET_BIN_UI_SCENE_MANAGER_ENGINE_ENGINE_H_
 
 #include <set>
 #include <vector>
@@ -118,7 +119,7 @@ class Engine : private FrameSchedulerDelegate {
   void TearDownSession(SessionId id);
 
   // |FrameSchedulerDelegate|:
-  void RenderFrame(const FrameTimingsPtr& frame,
+  bool RenderFrame(const FrameTimingsPtr& frame,
                    uint64_t presentation_time,
                    uint64_t presentation_interval) override;
 
@@ -137,9 +138,15 @@ class Engine : private FrameSchedulerDelegate {
                      const scenic::Metrics& parent_metrics,
                      std::vector<Node*>* updated_nodes);
 
+  // Invoke Escher::Cleanup().  If more work remains afterward, post a delayed
+  // task to try again; this is typically because cleanup couldn't finish due to
+  // unfinished GPU work.
+  void CleanupEscher();
+
   DisplayManager* const display_manager_;
   escher::Escher* const escher_;
   escher::PaperRendererPtr paper_renderer_;
+  escher::ShadowMapRendererPtr shadow_renderer_;
 
   ResourceLinker resource_linker_;
   EventTimestamper event_timestamper_;
@@ -154,11 +161,17 @@ class Engine : private FrameSchedulerDelegate {
   std::atomic<size_t> session_count_;
   SessionId next_session_id_ = 1;
 
+  bool escher_cleanup_scheduled_ = false;
+
   // Lists all Session that have updates to apply, sorted by the earliest
   // requested presentation time of each update.
   std::set<std::pair<uint64_t, fxl::RefPtr<Session>>> updatable_sessions_;
+
+  fxl::WeakPtrFactory<Engine> weak_factory_;  // must be last
 
   FXL_DISALLOW_COPY_AND_ASSIGN(Engine);
 };
 
 }  // namespace scene_manager
+
+#endif  // GARNET_BIN_UI_SCENE_MANAGER_ENGINE_ENGINE_H_

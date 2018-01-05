@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef GARNET_BIN_UI_SCENE_MANAGER_UTIL_UNWRAP_H_
+#define GARNET_BIN_UI_SCENE_MANAGER_UTIL_UNWRAP_H_
 
 #include "lib/escher/geometry/bounding_box.h"
 #include "lib/escher/geometry/transform.h"
@@ -29,6 +30,14 @@ inline escher::mat4 Unwrap(const scenic::mat4Ptr& args) {
           m[8], m[9], m[10], m[11], m[12], m[13], m[14], m[15]};
 }
 
+inline escher::vec3 Unwrap(const scenic::ColorRgbPtr& args) {
+  return {args->red, args->green, args->blue};
+}
+
+inline escher::vec4 Unwrap(const scenic::ColorRgbaPtr& args) {
+  return {args->red, args->green, args->blue, args->alpha};
+}
+
 inline escher::quat Unwrap(const scenic::QuaternionPtr& args) {
   return {args->w, escher::vec3(args->x, args->y, args->z)};
 }
@@ -39,7 +48,13 @@ inline escher::Transform Unwrap(const scenic::TransformPtr& args) {
 }
 
 inline escher::BoundingBox Unwrap(const scenic::BoundingBoxPtr& args) {
-  return {Unwrap(args->min), Unwrap(args->max)};
+  escher::vec3 min = Unwrap(args->min);
+  escher::vec3 max = Unwrap(args->max);
+  if (min.x > max.x || min.y > max.y || min.z > max.z) {
+    // This bounding box is empty.
+    return escher::BoundingBox();
+  }
+  return {min, max};
 }
 
 inline bool IsFloat(const scenic::ValuePtr& val) {
@@ -180,3 +195,5 @@ inline bool Unwrap(const scenic::ValuePtr& value, escher::Transform* out) {
 }
 
 }  // namespace scene_manager
+
+#endif  // GARNET_BIN_UI_SCENE_MANAGER_UTIL_UNWRAP_H_

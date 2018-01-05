@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef GARNET_BIN_UI_SCENE_MANAGER_DISPLAYS_DISPLAY_H_
+#define GARNET_BIN_UI_SCENE_MANAGER_DISPLAYS_DISPLAY_H_
 
 #include <zircon/types.h>
 #include <cstdint>
@@ -16,18 +17,13 @@ namespace scene_manager {
 // resolution, vsync interval, last vsync time, etc.
 class Display {
  public:
-  // TODO(MZ-124): We should derive an appropriate value from the rendering
-  // targets, in particular giving priority to couple to the display refresh
-  // (vsync).
-  static constexpr uint64_t kHardcodedPresentationIntervalNanos = 16'666'667;
-
   Display(DisplayMetrics metrics);
 
   // Obtain the time of the last Vsync, in nanoseconds.
   zx_time_t GetLastVsyncTime();
 
   // Obtain the interval between Vsyncs, in nanoseconds.
-  uint64_t GetVsyncInterval() const;
+  zx_time_t GetVsyncInterval() const;
 
   // Claiming a display means that no other display renderer can use it.
   bool is_claimed() const { return claimed_; }
@@ -52,3 +48,5 @@ class Display {
 };
 
 }  // namespace scene_manager
+
+#endif  // GARNET_BIN_UI_SCENE_MANAGER_DISPLAYS_DISPLAY_H_

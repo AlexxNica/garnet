@@ -6,7 +6,7 @@
 
 #include <string.h>
 
-#include "garnet/lib/machina/gpu.h"
+#include "garnet/lib/machina/virtio_gpu.h"
 
 namespace machina {
 
@@ -18,6 +18,15 @@ GpuBitmap::GpuBitmap(GpuBitmap&& o)
       buffer_(fbl::move(o.buffer_)),
       ptr_(o.ptr_) {
   o.ptr_ = nullptr;
+}
+
+GpuBitmap& GpuBitmap::operator=(GpuBitmap&& o) {
+  width_ = o.width_;
+  height_ = o.height_;
+  buffer_ = fbl::move(o.buffer_);
+  ptr_ = o.ptr_;
+  o.ptr_ = nullptr;
+  return *this;
 }
 
 GpuBitmap::GpuBitmap(uint32_t width, uint32_t height, uint8_t* ptr)

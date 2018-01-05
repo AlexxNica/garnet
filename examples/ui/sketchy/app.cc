@@ -3,6 +3,9 @@
 // found in the LICENSE file.
 
 #include "garnet/examples/ui/sketchy/app.h"
+
+#include <zircon/syscalls.h>
+#include <zircon/types.h>
 #include "lib/ui/sketchy/types.h"
 
 namespace {
@@ -18,7 +21,7 @@ sketchy_lib::StrokePath MockWavePath(glm::vec2 start, uint32_t seg_count) {
                         {start + glm::vec2{80, 0}}});
     start += glm::vec2{80, 0};
   }
-  return segments;
+  return sketchy_lib::StrokePath(segments);
 }
 
 }  // namespace
@@ -31,7 +34,9 @@ App::App()
       scene_manager_(
           context_->ConnectToEnvironmentService<scenic::SceneManager>()),
       session_(std::make_unique<scenic_lib::Session>(scene_manager_.get())),
-      canvas_(std::make_unique<Canvas>(context_.get())) {
+      canvas_(std::make_unique<Canvas>(context_.get())),
+      animated_path_at_top_(MockWavePath({570, 350}, 13)),
+      animated_path_at_bottom_(MockWavePath({50, 1050}, 26)) {
   session_->set_connection_error_handler([this] {
     FXL_LOG(INFO) << "sketchy_example: lost connection to scenic::Session.";
     loop_->QuitNow();
@@ -70,25 +75,67 @@ void App::Init(scenic::DisplayInfoPtr display_info) {
   Stroke stroke2(canvas_.get());
   stroke2.SetPath(path2);
 
-  StrokeGroup group(canvas_.get());
-  group.AddStroke(stroke1);
-  group.AddStroke(stroke2);
+  stable_group_ = std::make_unique<StrokeGroup>(canvas_.get());
+  stable_group_->AddStroke(stroke1);
+  stable_group_->AddStroke(stroke2);
 
-  // Draw waves
-  for (uint32_t i = 0; i < 4; i++) {
-    glm::vec2 start = {50, 50 + i * 100};
-    StrokePath path = MockWavePath(start, 26);
-    Stroke stroke(canvas_.get());
-    stroke.SetPath(path);
-    group.AddStroke(stroke);
-  }
+  animated_stroke_ = std::make_unique<Stroke>(canvas_.get());
+  animated_stroke_->SetPath(animated_path_at_top_);
+  stable_group_->AddStroke(*animated_stroke_.get());
 
-  ImportNode node(canvas_.get(), scene_->stroke_group_holder());
-  node.AddChild(group);
+  scratch_group_ = std::make_unique<StrokeGroup>(canvas_.get());
+  fitting_stroke_ = std::make_unique<Stroke>(canvas_.get());
+
+  Stroke tmp_stroke(canvas_.get());
+  scratch_group_->AddStroke(tmp_stroke);
+  tmp_stroke.Begin({600, 1300});
+  tmp_stroke.Extend({{680, 1350}, {720, 1300}, {760, 1350}});
+  tmp_stroke.Finish();
+
+  import_node_ = std::make_unique<ImportNode>(
+      canvas_.get(), scene_->stroke_group_holder());
+  import_node_->AddChild(*stable_group_.get());
+  import_node_->AddChild(*scratch_group_.get());
 
   uint64_t time = zx_time_get(ZX_CLOCK_MONOTONIC);
-  canvas_->Present(time, [](scenic::PresentationInfoPtr info) {});
+  canvas_->Present(
+      time, std::bind(&App::CanvasCallback, this, std::placeholders::_1));
   session_->Present(time, [](scenic::PresentationInfoPtr info) {});
+}
+
+void App::CanvasCallback(scenic::PresentationInfoPtr info) {
+  zx_nanosleep(zx_deadline_after(ZX_SEC(1)));
+  uint64_t time = zx_time_get(ZX_CLOCK_MONOTONIC);
+
+  // Demo of multi-buffering
+  is_animated_stroke_at_top_ = !is_animated_stroke_at_top_;
+  if (is_animated_stroke_at_top_) {
+    animated_stroke_->SetPath(animated_path_at_top_);
+  } else {
+    animated_stroke_->SetPath(animated_path_at_bottom_);
+  }
+
+  // Demo of stroke fitting
+  if (fitting_step_ == 0) {
+    scratch_group_->AddStroke(*fitting_stroke_.get());
+    fitting_stroke_->Begin({600, 1200});
+    fitting_stroke_->Extend({{680, 1250}, {720, 1200}, {760, 1250}});
+    fitting_step_ = 1;
+  } else if (fitting_step_ == 1) {
+    fitting_stroke_->Extend({{800, 1200}, {840, 1250}, {880, 1200}});
+    fitting_stroke_->Finish();
+    fitting_step_ = 2;
+  } else if (fitting_step_ == 2) {
+    scratch_group_->RemoveStroke(*fitting_stroke_.get());
+    stable_group_->AddStroke(*fitting_stroke_.get());
+    fitting_step_ = 3;
+  } else if (fitting_step_ == 3) {
+    stable_group_->RemoveStroke(*fitting_stroke_.get());
+    fitting_step_ = 0;
+  }
+
+  canvas_->Present(
+      time, std::bind(&App::CanvasCallback, this, std::placeholders::_1));
 }
 
 }  // namespace sketchy_example

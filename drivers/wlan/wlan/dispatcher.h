@@ -21,6 +21,7 @@ enum class ObjectSubtype : uint8_t {
 enum class ObjectTarget : uint8_t {
     kScanner = 0,
     kStation = 1,
+    kBss = 2,
 };
 
 // An ObjectId is used as an id in a PortKey. Therefore, only the lower 56 bits may be used.
@@ -46,9 +47,6 @@ class Dispatcher {
     explicit Dispatcher(DeviceInterface* device);
     ~Dispatcher();
 
-    // TODO(hahnr): Let's try to get rid of this and other Init() methods inside the MLME.
-    zx_status_t Init();
-
     zx_status_t HandlePacket(const Packet* packet);
     zx_status_t HandlePortPacket(uint64_t key);
 
@@ -65,10 +63,22 @@ class Dispatcher {
     zx_status_t HandleMgmtPacket(const Packet* packet);
     zx_status_t HandleEthPacket(const Packet* packet);
     zx_status_t HandleSvcPacket(const Packet* packet);
-    template <typename Message> zx_status_t HandleMlmeMethod(const Packet* packet, Method method);
+    template <typename Message, typename FidlStruct = ::fidl::StructPtr<Message>>
+    zx_status_t HandleMlmeMethod(const Packet* packet, Method method);
+    template <typename Message>
+    zx_status_t HandleMlmeMethodInlinedStruct(const Packet* packet, Method method) {
+        return HandleMlmeMethod<Message, ::fidl::InlinedStructPtr<Message>>(packet, method);
+    }
     zx_status_t HandleActionPacket(const Packet* packet, const MgmtFrameHeader* hdr,
                                    const ActionFrame* action, const wlan_rx_info_t* rxinfo);
 
+    DeviceInterface* device_;
+    // Created and destroyed dynamically:
+    // - Creates ClientMlme when MLME-JOIN.request or MLME-SCAN.request was received.
+    // - Creates ApMlme when MLME-START.request was received.
+    // - Destroys Mlme when MLME-RESET.request was received.
+    // Note: Mode can only be changed at boot up or when MLME-RESET.request was sent in between mode
+    // changes.
     fbl::unique_ptr<Mlme> mlme_;
 };
 

@@ -39,7 +39,7 @@ class DeviceState : public fbl::RefCounted<DeviceState> {
 
    private:
     common::MacAddr addr_;
-    wlan_channel_t chan_ = {0};
+    wlan_channel_t chan_ = {};
     uint16_t seq_no_ = 0;
     bool online_ = false;
 };
@@ -61,6 +61,7 @@ class DeviceInterface {
     virtual zx_status_t SetKey(wlan_key_config_t* key_config) = 0;
 
     virtual fbl::RefPtr<DeviceState> GetState() = 0;
+    virtual const wlanmac_info_t& GetWlanInfo() const = 0;
 };
 
 }  // namespace wlan

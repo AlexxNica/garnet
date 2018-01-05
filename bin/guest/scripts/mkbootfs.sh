@@ -6,7 +6,7 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT
 
-set -e
+set -eo pipefail
 
 GUEST_SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 FUCHSIA_DIR="${GUEST_SCRIPTS_DIR}/../../../.."
@@ -32,12 +32,13 @@ while getopts "g:l:i:r:" opt; do
   *) usage ;;
   esac
 done
-shift $((OPTIND-1))
+shift $((OPTIND - 1))
 
 case "${1}" in
 arm64)
   cd out/debug-aarch64;
-  PLATFORM="zircon-hikey960-arm64";
+  ARCH=arm64
+  PLATFORM=hikey960;
   GUEST_BOOTDATA="\
     guest-mdi.bin
     guest-platform-id.bin";
@@ -55,7 +56,8 @@ arm64)
   IMAGE=${IMAGE:-/tmp/linux/arch/arm64/boot/Image};;
 x86)
   cd out/debug-x86-64;
-  PLATFORM="zircon-pc-x86-64";
+  ARCH=x86
+  PLATFORM=x86;
   IMAGE=${IMAGE:-/tmp/linux/arch/x86/boot/bzImage};;
 *)
   usage;;
@@ -63,8 +65,8 @@ esac
 
 declare -r ZIRCON=${ZIRCON:-../build-zircon/build-$PLATFORM/zircon.bin}
 declare -r ZIRCON_GPT=${ZIRCON_GPT:zircon.gpt}
-declare -r INITRD=${INITRD:-/tmp/toybox/initrd.gz}
-declare -r ROOTFS=${ROOTFS:-/tmp/toybox/rootfs.ext2}
+declare -r INITRD=${INITRD:-/tmp/toybox-$ARCH/initrd.gz}
+declare -r ROOTFS=${ROOTFS:-/tmp/toybox-$ARCH/rootfs.ext2}
 
 [ -f "${ZIRCON_GPT}" ] && GUEST_MANIFEST+=$'\n'"data/zircon.gpt=${ZIRCON_GPT}"
 [ -f "${IMAGE}" ] && GUEST_MANIFEST+=$'\n'"data/image=${IMAGE}"

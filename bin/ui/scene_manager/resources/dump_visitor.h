@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#pragma once
+#ifndef GARNET_BIN_UI_SCENE_MANAGER_RESOURCES_DUMP_VISITOR_H_
+#define GARNET_BIN_UI_SCENE_MANAGER_RESOURCES_DUMP_VISITOR_H_
 
 #include <cstdint>
 #include <iosfwd>
@@ -40,6 +41,8 @@ class DumpVisitor : public ResourceVisitor {
   void Visit(Layer* r) override;
   void Visit(Camera* r) override;
   void Visit(Renderer* r) override;
+  void Visit(Light* r) override;
+  void Visit(AmbientLight* r) override;
   void Visit(DirectionalLight* r) override;
   void Visit(Import* r) override;
 
@@ -65,3 +68,5 @@ class DumpVisitor : public ResourceVisitor {
 };
 
 }  // namespace scene_manager
+
+#endif  // GARNET_BIN_UI_SCENE_MANAGER_RESOURCES_DUMP_VISITOR_H_

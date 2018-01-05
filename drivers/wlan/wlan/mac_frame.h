@@ -403,6 +403,10 @@ struct MgmtFrameHeader {
 
 // IEEE Std 802.11-2016, 9.3.3.3
 struct Beacon {
+    static constexpr ManagementSubtype Subtype() {return ManagementSubtype::kBeacon; }
+
+    bool Validate(size_t len);
+
     // 9.4.1.10
     uint64_t timestamp;
     // 9.4.1.3
@@ -415,6 +419,8 @@ struct Beacon {
 
 // IEEE Std 802.11-2016, 9.3.3.10
 struct ProbeRequest {
+    static constexpr ManagementSubtype Subtype() {return ManagementSubtype::kProbeRequest; }
+
     bool Validate(size_t len);
 
     uint8_t elements[];
@@ -422,6 +428,8 @@ struct ProbeRequest {
 
 // IEEE Std 802.11-2016, 9.3.3.11
 struct ProbeResponse {
+    static constexpr ManagementSubtype Subtype() {return ManagementSubtype::kProbeResponse; }
+
     // 9.4.1.10
     uint64_t timestamp;
     // 9.4.1.3
@@ -444,6 +452,8 @@ enum AuthAlgorithm : uint16_t {
 
 // IEEE Std 802.11-2016, 9.3.3.12
 struct Authentication {
+    static constexpr ManagementSubtype Subtype() {return ManagementSubtype::kAuthentication; }
+
     // TODO(tkilbourn): bool Validate(size_t len)
     // Authentication frames are complicated, so when we need more than Open
     // System auth, figure out how to proceed.
@@ -460,6 +470,8 @@ struct Authentication {
 
 // IEEE Std 802.11-2016, 9.3.3.13
 struct Deauthentication {
+    static constexpr ManagementSubtype Subtype() {return ManagementSubtype::kDeauthentication; }
+
     // 9.4.1.7
     uint16_t reason_code;
 
@@ -470,6 +482,8 @@ struct Deauthentication {
 
 // IEEE Std 802.11-2016, 9.3.3.6
 struct AssociationRequest {
+    static constexpr ManagementSubtype Subtype() {return ManagementSubtype::kAssociationRequest; }
+
     bool Validate(size_t len);
 
     // 9.4.1.4
@@ -484,6 +498,8 @@ constexpr uint16_t kAidMask = (1 << 11) - 1;
 
 // IEEE Std 802.11-2016, 9.3.3.7
 struct AssociationResponse {
+    static constexpr ManagementSubtype Subtype() {return ManagementSubtype::kAssociationResponse; }
+
     // 9.4.1.4
     CapabilityInfo cap;
     // 9.4.1.9
@@ -496,6 +512,8 @@ struct AssociationResponse {
 
 // IEEE Std 802.11-2016, 9.3.3.5
 struct Disassociation {
+    static constexpr ManagementSubtype Subtype() {return ManagementSubtype::kDisassociation; }
+
     // 9.4.1.7
     uint16_t reason_code;
 

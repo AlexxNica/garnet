@@ -63,7 +63,6 @@
         "garnet/packages/url",
         "garnet/packages/vboot_reference",
         "garnet/packages/vim",
-        "garnet/packages/wlan_tests",
         "garnet/packages/wlanstack",
         "garnet/packages/zircon_benchmarks"
     ]

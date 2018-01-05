@@ -24,23 +24,21 @@ class {{union|name}} extends bindings.Union {
 {%-   endfor %}
   };
 
-  var _data;
-  {{union|name}}Tag _tag = {{union|name}}Tag.unknown;
-
-  {{union|name}}Tag get tag => _tag;
+  final _data;
+  final {{union|name}}Tag tag;
 
 {%-   for field in union.fields %}
+  const {{union|name}}.with{{field|name|upper_camel}}({{field.kind|dart_type}} {{field|name}}) :
+    tag = {{union|name}}Tag.{{field|name}},
+    _data = {{field|name}};
+
   {{field.kind|dart_type}} get {{field|name}} {
-    if (_tag != {{union|name}}Tag.{{field|name}}) {
-      throw new bindings.UnsetUnionTagError(_tag, {{union|name}}Tag.{{field|name}});
+    if (tag != {{union|name}}Tag.{{field|name}}) {
+      throw new bindings.UnsetUnionTagError(tag, {{union|name}}Tag.{{field|name}});
     }
     return _data;
   }
 
-  set {{field|name}}({{field.kind|dart_type}} value) {
-    _tag = {{union|name}}Tag.{{field|name}};
-    _data = value;
-  }
 {%-   endfor %}
 
   static {{union|name}} decode(bindings.Decoder decoder0, int offset) {
@@ -48,8 +46,6 @@ class {{union|name}} extends bindings.Union {
     if (size == 0) {
       return null;
     }
-    {{union|name}} result = new {{union|name}}();
-
     {# Unknown union members not handled. #}
     {{union|name}}Tag tag = _intToTag[decoder0.decodeUint32(offset + 4)];
     switch (tag) {
@@ -57,24 +53,23 @@ class {{union|name}} extends bindings.Union {
       case {{union|name}}Tag.{{field|name}}:
 {%-     if field.kind|is_union_kind %}
         var decoder1 = decoder0.decodePointer(offset + 8, {{field.kind|is_nullable_kind|dart_true_false}});
-        result.{{field|name}} = {{field.kind|dart_type}}.decode(decoder1, 0);
+        return new {{union|name}}.with{{field|name|upper_camel}}({{field.kind|dart_type}}.decode(decoder1, 0));
 {%-     else %}
-        {{encoding_macros.decode('result.' ~ field|name, field.kind, "offset + 8", 0)|indent(8)}}
+        {{field.kind|dart_type}} {{field|name}};
+        {{encoding_macros.decode(field|name, field.kind, "offset + 8", 0)|indent(8)}}
+        return new {{union|name}}.with{{field|name|upper_camel}}({{field|name}});
 {%-     endif %}
         break;
 {%-   endfor %}
       default:
         throw new bindings.FidlCodecError("Bad union tag: $tag");
     }
-
-    return result;
   }
 
   void encode(bindings.Encoder encoder_0, int offset) {
-    {# TODO(azani): Error when trying to encode an unknown member. #}
     encoder_0.encodeUint32(16, offset);
-    encoder_0.encodeUint32(_tagToInt[_tag], offset + 4);
-    switch (_tag) {
+    encoder_0.encodeUint32(_tagToInt[tag], offset + 4);
+    switch (tag) {
 {%-   for field in union.fields %}
       case {{union|name}}Tag.{{field|name}}:
 {%-     if field.kind|is_union_kind %}
@@ -85,13 +80,13 @@ class {{union|name}} extends bindings.Union {
         break;
 {%-   endfor %}
       default:
-        throw new bindings.FidlCodecError("Bad union tag: $_tag");
+        throw new bindings.FidlCodecError("Bad union tag: $tag");
     }
   }
 
   String toString() {
     String result = "{{union|name}}(";
-    switch (_tag) {
+    switch (tag) {
 {%-   for field in union.fields %}
       case {{union|name}}Tag.{{field|name}}:
         result += "{{field|name}}";
