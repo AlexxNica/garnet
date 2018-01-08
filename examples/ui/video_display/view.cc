@@ -154,8 +154,9 @@ zx_status_t View::SetupBuffers(const std::vector<BufferLayout> &buffer_layouts,
                          scenic::MemoryType::HOST_MEMORY,
                          buffer_layouts[i].vmo_offset);
     // now set up a callback for when the release fense is set:
-    BufferHandler handler(b, i, fbl::BindMember(this, &View::BufferReleased));
-    frame_handlers_.push_back(std::move(handler));
+    // BufferHandler handler(b, i, fbl::BindMember(this, &View::BufferReleased));
+    // frame_handlers_.push_back(std::move(handler));
+    frame_handlers_.emplace_back(b, i, fbl::BindMember(this, &View::BufferReleased));
   }
   return ZX_OK;
 }
