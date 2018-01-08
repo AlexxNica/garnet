@@ -56,7 +56,7 @@ using BufferNotifier  = fbl::Function<void(uint32_t index)>;
 
 class BufferHandler {
  public:
-  BufferHandler(Buffer *buffer, uint32_t index, BufferNotifier &notifier) :
+  BufferHandler(Buffer *buffer, uint32_t index, BufferNotifier notifier) :
       // buffer_(buffer),
       index_(index),
       notifier_(fbl::move(notifier)),
