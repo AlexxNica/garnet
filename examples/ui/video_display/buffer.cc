@@ -71,6 +71,7 @@ void Buffer::Fill(uint8_t r, uint8_t g, uint8_t b) {
          i < width_ * height_; i++) {
         pixels_[i] = color;
     }
+    // FXL_LOG(INFO) << "Calling op_range ";
 
     // The zircon kernel has a bug where it does a full cache flush for every
     // page.  ZX-806.
@@ -88,6 +89,9 @@ void Buffer::Reset() {
     release_fence_.signal(ZX_EVENT_SIGNALED, 0);
 }
 
+void Buffer::Release() {
+    release_fence_.signal(0, ZX_EVENT_SIGNALED);
+}
 void Buffer::Signal() {
     acquire_fence_.signal(0, ZX_EVENT_SIGNALED);
 }
