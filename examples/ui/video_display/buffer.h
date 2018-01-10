@@ -23,6 +23,7 @@ struct Buffer {
   void Reset();
   void Reserve();
   void Signal();
+  void Release();
 
   const zx::event& acqure_fence() { return acquire_fence_; }
   const zx::event& release_fence() { return release_fence_; }
@@ -41,19 +42,49 @@ struct Buffer {
 
   static Buffer *NewBuffer(uint32_t width, uint32_t height, const zx::vmo &main_buffer, uint64_t offset);
 
+  bool IsReleased() { 
+    // TODO: make sure this actually works, and doesn't just always throw the
+    // timeout...
+    zx_signals_t observed;
+    zx_status_t ret = acquire_fence_.wait_one(ZX_EVENT_SIGNALED, 0, 
+                                                       &observed);
+    if (ret == ZX_OK) {
+        FXL_LOG(INFO) << "Wait returned OK";
+        return true;
+    }
+    if (ZX_EVENT_SIGNALED & observed) {
+        FXL_LOG(INFO) << "Wait timed out, ZX_EVENT_SIGNALED is set.";
+        return true;
+    }
+    FXL_LOG(INFO) << "Wait timed out, ZX_EVENT_SIGNALED is cleared.";
+    return false;
+
+  }
   bool IsReserved() { 
     // TODO: make sure this actually works, and doesn't just always throw the
     // timeout...
-    return ZX_ERR_TIMED_OUT == acquire_fence_.wait_one(ZX_EVENT_SIGNALED, 0, 
-                                                       NULL);
+    zx_signals_t observed;
+    zx_status_t ret = acquire_fence_.wait_one(ZX_EVENT_SIGNALED, 0, 
+                                                       &observed);
+    if (ret == ZX_OK) {
+        FXL_LOG(INFO) << "Wait returned OK";
+        return false;
+    }
+    if (ZX_EVENT_SIGNALED & observed) {
+        FXL_LOG(INFO) << "Wait timed out, ZX_EVENT_SIGNALED is set.";
+        return false;
+    }
+    FXL_LOG(INFO) << "Wait timed out, ZX_EVENT_SIGNALED is cleared.";
+    return true;
+
   }
 
+  uint32_t *pixels_; //DEBUG
  private:
   Buffer() {};
 
   zx::vmo vmo_;
   uint64_t vmo_offset;
-  uint32_t *pixels_;
   uint64_t size_;
   uint32_t width_;
   uint32_t height_;

@@ -16,8 +16,10 @@ int main(int argc, const char** argv) {
     return 1;
 
   fsl::MessageLoop loop;
+  FXL_LOG(INFO) << "Set up message loop.";
   trace::TraceProvider trace_provider(loop.async());
 
+  FXL_LOG(INFO) << "Set up trace provider.";
   mozart::ViewProviderApp app([](mozart::ViewContext view_context) {
     return std::make_unique<video_display::View>(
         view_context.application_context, std::move(view_context.view_manager),
