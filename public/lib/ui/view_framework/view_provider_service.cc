@@ -16,7 +16,7 @@ ViewProviderService::ViewProviderService(
     ViewFactory view_factory)
     : application_context_(application_context), view_factory_(view_factory) {
   FXL_DCHECK(application_context_);
-
+  FXL_LOG(INFO) << "ViewProviderService::ViewProviderService";
   application_context_->outgoing_services()->AddService<ViewProvider>(
       [this](fidl::InterfaceRequest<ViewProvider> request) {
         bindings_.AddBinding(this, std::move(request));
@@ -36,7 +36,7 @@ void ViewProviderService::CreateView(
       application_context_->ConnectToEnvironmentService<ViewManager>();
   view_context.view_owner_request = std::move(view_owner_request);
   view_context.outgoing_services = std::move(view_services);
-
+  FXL_LOG(INFO) << "ViewProviderService::CreateView.";
   std::unique_ptr<BaseView> view = view_factory_(std::move(view_context));
   if (view) {
     view->SetReleaseHandler([ this, view = view.get() ] {

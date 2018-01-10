@@ -28,29 +28,85 @@ class FrameScheduler {
   uint64_t presentation_interval_ns_ = 33000000;
   uint64_t last_presentation_time_ns_ = 0;
   std::deque<uint64_t> requested_presentation_times_;
+  // Debug:
+  std::deque<uint32_t> buffer_ids_;
  public:
   // Get the next frame presentation time
-  uint64_t GetNextPresentationTime() {
+  uint64_t GetNextPresentationTime(uint32_t buffer_id) {
+    std::lock_guard<std::mutex> lck (time_lock_);
     last_presentation_time_ns_ += presentation_interval_ns_;
     requested_presentation_times_.push_back(last_presentation_time_ns_);
+    buffer_ids_.push_back(buffer_id);
     return last_presentation_time_ns_;
   }
 
-  void Update(uint64_t presentation_time, uint64_t presentation_interval) {
+  uint32_t Update(uint64_t presentation_time, uint64_t presentation_interval) {
+    std::lock_guard<std::mutex> lck (time_lock_);
     if (requested_presentation_times_.size() == 0) {
-      return;
+      FXL_LOG(INFO) << "Attempting to update with no queued times!";
+      return 0;
     } // todo: add lots of errors
     int64_t diff = presentation_time - requested_presentation_times_.front();
-    requested_presentation_times_.pop_front();
+    uint64_t updated_time = presentation_time + presentation_interval_ns_ * (requested_presentation_times_.size() - 1);
+    FXL_LOG(INFO) << " Buffer Presented: " << buffer_ids_.front();
+    FXL_LOG(INFO) << "Presentation time: " << presentation_time;
+    FXL_LOG(INFO) << "        requested: " << requested_presentation_times_.front();
+    FXL_LOG(INFO) << "           latest: " << last_presentation_time_ns_;
+    FXL_LOG(INFO) << "  possible update: " << updated_time;
     if (diff > 0) {
       // we are behind - we need to advance our presentation timing
-      last_presentation_time_ns_ += diff;
+      if (updated_time > last_presentation_time_ns_) {
+          FXL_LOG(INFO) << "Presentation times falling behind.  updating by " 
+              << updated_time - last_presentation_time_ns_;
+          last_presentation_time_ns_ = updated_time;
+      } else {
+          FXL_LOG(INFO) << "Presentation times falling behind.  no update "; 
+      }
+        // last_presentation_time_ns_ += diff;
     } // todo error if < 0
+    requested_presentation_times_.pop_front();
+    uint32_t ret = buffer_ids_.front();
+    buffer_ids_.pop_front();
     presentation_interval_ns_ = presentation_interval;
+    return ret;
   }
+
+  std::mutex time_lock_;
 
 };
 
+
+
+
+
+class FakeVideoSource {
+  uint32_t frame_color_ = 0x80;
+  static constexpr uint32_t kFrameColorInc = 0x10;
+  static constexpr uint32_t kMaxFrameColor = 0x600;
+ public:
+  void WriteToBuffer(Buffer *buffer) {
+    uint8_t r, g, b;
+    hsv_color(frame_color_, &r, &g, &b);
+    FXL_LOG(INFO) << "Filling with " << (int)r << " " << (int)g << " " << (int)b;
+    buffer->Fill(r, g, b);
+    frame_color_ += kFrameColorInc;
+    if (frame_color_ > kMaxFrameColor) {
+        frame_color_ -= kMaxFrameColor;
+    }
+  }
+
+  void hsv_color(uint32_t index, uint8_t *r, uint8_t *g, uint8_t *b) {
+    uint8_t pos = index & 0xff;
+    uint8_t neg = 0xff - (index & 0xff);
+    uint8_t phase = (index >> 8) & 0x7;
+    uint8_t phases[6] = {0xff, 0xff, neg, 0x00, 0x00, pos};
+    *r = phases[(phase + 1) % 6];
+    *g = phases[(phase + 5) % 6];
+    *b = phases[(phase + 3) % 6];
+  }
+
+
+};
 
 using BufferNotifier  = fbl::Function<void(uint32_t index)>;
 
@@ -116,8 +172,8 @@ zx_status_t SetupBuffers(const std::vector<BufferLayout> &buffer_layouts,
                    const zx::vmo &vmo);
  private:
   // |BaseView|.
-  // void OnSceneInvalidated(
-      // scenic::PresentationInfoPtr presentation_info) override;
+  void OnSceneInvalidated(
+      scenic::PresentationInfoPtr presentation_info) override;
 
   // app::ApplicationContext* const application_context_;
   fsl::MessageLoop* loop_;
@@ -128,12 +184,14 @@ zx_status_t SetupBuffers(const std::vector<BufferLayout> &buffer_layouts,
   scenic::ImagePipePtr image_pipe_;
 
   std::vector<Buffer*> frame_buffers_;
+  std::vector<bool> frame_locks_;
   std::list<BufferHandler> frame_handlers_; // todo: this can't be resized...
   // uint32_t buffer_position = 0;
   zx::vmo vmo_;
   FrameScheduler frame_scheduler_;
   // zx_time_t frame_start_time_ = 0;
-
+  FakeVideoSource fake_video_source_;
+  
   FXL_DISALLOW_COPY_AND_ASSIGN(View);
 };
 
